@@ -1,0 +1,2732 @@
+import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+import requests
+import json
+import time
+import threading
+import os
+import uuid
+import html
+import re
+import pyotp
+import random
+from datetime import datetime
+import io
+import sys
+
+# Track server uptime
+START_TIME = time.time()
+
+# --- Telegram Latest Feature Check (CopyTextButton) ---
+try:
+    from telebot.types import CopyTextButton
+    HAS_COPY_BTN = True
+except ImportError:
+    HAS_COPY_BTN = False
+
+# ============================================
+# --- STYLE PATCH FOR TELEBOT BUTTONS (COLORFUL BUTTONS) ---
+# ============================================
+_old_inline_dict = InlineKeyboardButton.to_dict
+def _new_inline_dict(self):
+    d = _old_inline_dict(self)
+    if hasattr(self, 'style'): d['style'] = self.style
+    return d
+InlineKeyboardButton.to_dict = _new_inline_dict
+
+_old_kb_dict = KeyboardButton.to_dict
+def _new_kb_dict(self):
+    d = _old_kb_dict(self)
+    if hasattr(self, 'style'): d['style'] = self.style
+    return d
+KeyboardButton.to_dict = _new_kb_dict
+
+def ibtn(text, callback_data=None, url=None, style=None, copy_text_str=None):
+    kwargs = {'text': text}
+    if callback_data: kwargs['callback_data'] = callback_data
+    if url: kwargs['url'] = url
+    
+    if copy_text_str:
+        if HAS_COPY_BTN:
+            kwargs['copy_text'] = CopyTextButton(text=str(copy_text_str))
+        else:
+            kwargs['callback_data'] = f"cp_{copy_text_str}"
+            
+    b = InlineKeyboardButton(**kwargs)
+    if style: b.style = style
+    return b
+
+def rbtn(text, style=None):
+    b = KeyboardButton(text=text)
+    if style: b.style = style
+    return b
+
+# ============================================
+# 🔥 VOLTX SMS PANEL - CORRECT CONFIGURATION
+# ============================================
+TOKEN = "8861377597:AAHZr9mXZ7P-FXExNcDrHvgQfU2812GVSHg"  
+ADMIN_ID = 8746661403
+
+# ✅ CORRECT BASE URL FROM YOUR API DOCUMENTATION
+BASE_URL = "https://api.2009.cloud/MXS47FLFX0U/tnevs/@public/api"
+VOLTX_API_KEY = "ME5KYMGWL61"
+NEXA_API_KEY = VOLTX_API_KEY  # For compatibility
+
+BOT_NAME = "MINO X SMS BOT"
+
+# Default values (Now dynamically controlled from Admin Panel)
+MAX_NUMBERS = 3  
+REF_BONUS = 0.085  
+OTP_BONUS = 0.00041 
+
+# --- CURRENCY CONVERSION RATES (1 USD to Local) ---
+EXCHANGE_RATES = {"en": 1.0, "bn": 120.0, "hi": 83.0, "ur": 280.0}
+CURRENCY_SYMBOLS = {"en": "$", "bn": "৳", "hi": "₹", "ur": "Rs"}
+
+def format_currency(amount_usd, lang="en"):
+    rate = EXCHANGE_RATES.get(lang, 1.0)
+    sym = CURRENCY_SYMBOLS.get(lang, "$")
+    converted = float(amount_usd) * rate
+    if converted == 0:
+        return f"{sym}0.00"
+    elif converted < 0.01:
+        return f"{sym}{converted:.4f}"
+    else:
+        return f"{sym}{converted:.2f}"
+
+def convert_to_usd(amount_local, lang="en"):
+    rate = EXCHANGE_RATES.get(lang, 1.0)
+    return float(amount_local) / rate
+
+# --- DESIGN CONSTANTS & PREMIUM EMOJIS ---
+DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━"
+THIN_DIVIDER = "──────────────────────"
+
+PR_GEM = '<tg-emoji emoji-id="5427009714745517609">💎</tg-emoji>'
+PR_FIRE = '<tg-emoji emoji-id="5427009714745517609">🔥</tg-emoji>'
+PR_STAR = '<tg-emoji emoji-id="5427009714745517609">🌟</tg-emoji>'
+PR_SHIELD = '<tg-emoji emoji-id="5427009714745517609">🔰</tg-emoji>'
+
+# --- MULTI-LANGUAGE DICTIONARY ---
+LANG_DICT = {
+    "en": {
+        "btn_sms": "📱 𝗚𝗘𝗧 𝗡𝗨𝗠𝗕𝗘𝗥",
+        "btn_traffic": "📊 𝗧𝗥𝗔𝗙𝗙𝗜𝗖 𝗦𝗘𝗥𝗩𝗘𝗥",
+        "btn_balance": "👤 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 & 𝗪𝗔𝗟𝗟𝗘𝗧",
+        "btn_referral": "🎁 𝗥𝗘𝗙𝗘𝗥𝗥𝗔𝗟",
+        "btn_leader": "🏆 𝗟𝗘𝗔𝗗𝗘𝗥𝗕𝗢𝗔𝗥𝗗",
+        "btn_support": "🎧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 & 𝗛𝗘𝗟𝗣",
+        "btn_2fa": "🔐 𝟮𝗙𝗔 𝗢𝗡𝗟𝗜𝗡𝗘",
+        "btn_admin": "⚙️ 𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟",
+        "btn_lang": "🌐 𝗟𝗔𝗡𝗚𝗨𝗔𝗚𝗘",
+        "welcome_hdr": "WELCOME",
+        "balance": "YOUR BALANCE",
+        "features": "AVAILABLE FEATURES",
+        "profile_hdr": "MY PROFILE & WALLETS",
+        "name": "NAME",
+        "username": "USERNAME",
+        "user_id": "USER ID",
+        "tier": "ACCOUNT TIER",
+        "current_balance": "CURRENT BALANCE",
+        "total_otps": "TOTAL OTPS",
+        "saved_wallets": "YOUR SAVED WALLETS",
+        "withdraw_info": "WITHDRAWAL INFO",
+        "manage_wallets": "MANAGE YOUR PAYMENT WALLETS",
+        "refresh_prof": "🔄 REFRESH PROFILE",
+        "recent_otps_btn": "📜 RECENT OTPS",
+        "req_with_btn": "💸 REQUEST WITHDRAWAL",
+        "select_service": "SELECT SERVICE",
+        "no_services": "NO SERVICES ADDED",
+        "traffic_hdr": "TRAFFIC SERVER",
+        "traffic_desc": "TYPE SERVICE NAME (E.G. WHATSAPP)\nSEND /cancel TO STOP"
+    },
+    "bn": {
+        "btn_sms": "📱 নাম্বার নিন",
+        "btn_traffic": "📊 ট্রাফিক সার্ভার",
+        "btn_balance": "👤 প্রোফাইল ও ওয়ালেট",
+        "btn_referral": "🎁 রেফারেল",
+        "btn_leader": "🏆 লিডারবোর্ড",
+        "btn_support": "🎧 সাপোর্ট ও সাহায্য",
+        "btn_2fa": "🔐 ২এফএ (2FA)",
+        "btn_admin": "⚙️ এডমিন প্যানেল",
+        "btn_lang": "🌐 ভাষা পরিবর্তন",
+        "welcome_hdr": "স্বাগতম",
+        "balance": "আপনার ব্যালেন্স",
+        "features": "উপলব্ধ ফিচারসমূহ",
+        "profile_hdr": "আমার প্রোফাইল ও ওয়ালেট",
+        "name": "নাম",
+        "username": "ইউজারনেম",
+        "user_id": "ইউজার আইডি",
+        "tier": "অ্যাকাউন্ট টিয়ার",
+        "current_balance": "বর্তমান ব্যালেন্স",
+        "total_otps": "সর্বমোট ওটিপি",
+        "saved_wallets": "আপনার সেভ করা ওয়ালেট",
+        "withdraw_info": "উত্তোলন তথ্য",
+        "manage_wallets": "আপনার পেমেন্ট ওয়ালেট পরিচালনা করুন",
+        "refresh_prof": "🔄 প্রোফাইল রিফ্রেশ",
+        "recent_otps_btn": "📜 সাম্প্রতিক ওটিপি",
+        "req_with_btn": "💸 উত্তোলনের আবেদন",
+        "select_service": "সার্ভিস নির্বাচন করুন",
+        "no_services": "কোনো সার্ভিস যুক্ত নেই",
+        "traffic_hdr": "ট্রাফিক সার্ভার",
+        "traffic_desc": "সার্ভিসের নাম লিখুন (যেমন: WHATSAPP)\nবন্ধ করতে /cancel পাঠান"
+    },
+    "hi": {
+        "btn_sms": "📱 नंबर लें",
+        "btn_traffic": "📊 ट्रैफ़िक सर्वर",
+        "btn_balance": "👤 प्रोफ़ाइल और वॉलेट",
+        "btn_referral": "🎁 रेफ़रल",
+        "btn_leader": "🏆 लीडरबोर्ड",
+        "btn_support": "🎧 सहायता",
+        "btn_2fa": "🔐 2FA ऑनलाइन",
+        "btn_admin": "⚙️ एडमिन पैनल",
+        "btn_lang": "🌐 भाषा (Language)",
+        "welcome_hdr": "स्वागत है",
+        "balance": "आपका बैलेंस",
+        "features": "उपलब्ध सुविधाएं",
+        "profile_hdr": "मेरी प्रोफ़ाइल और वॉलेट",
+        "name": "नाम",
+        "username": "यूज़रनेम",
+        "user_id": "यूज़र आईडी",
+        "tier": "अकाउंट टियर",
+        "current_balance": "वर्तमान बैलेंस",
+        "total_otps": "कुल OTPs",
+        "saved_wallets": "आपके सेव किए गए वॉलेट",
+        "withdraw_info": "निकासी की जानकारी",
+        "manage_wallets": "अपने पेमेंट वॉलेट मैनेज करें",
+        "refresh_prof": "🔄 प्रोफ़ाइल रीफ्रेश",
+        "recent_otps_btn": "📜 हाल के OTPs",
+        "req_with_btn": "💸 निकासी का अनुरोध",
+        "select_service": "सर्विस चुनें",
+        "no_services": "कोई सर्विस नहीं जोड़ी गई",
+        "traffic_hdr": "ट्रैफ़िक सर्वर",
+        "traffic_desc": "सर्विस का नाम लिखें (जैसे: WHATSAPP)\nरोकने के लिए /cancel भेजें"
+    },
+    "ur": {
+        "btn_sms": "📱 نمبر حاصل کریں",
+        "btn_traffic": "📊 ٹریفک سرور",
+        "btn_balance": "👤 پروفائل اور والیٹ",
+        "btn_referral": "🎁 ریفرل",
+        "btn_leader": "🏆 لیڈر بورڈ",
+        "btn_support": "🎧 مدد",
+        "btn_2fa": "🔐 2FA آن لائن",
+        "btn_admin": "⚙️ ایڈمن پینل",
+        "btn_lang": "🌐 زبان (Language)",
+        "welcome_hdr": "خوش آمدید",
+        "balance": "آپ کا بیلنس",
+        "features": "دستیاب خصوصیات",
+        "profile_hdr": "میری پروفائل اور والیٹ",
+        "name": "نام",
+        "username": "صارف نام",
+        "user_id": "صارف کی شناخت",
+        "tier": "اکاؤنٹ کا درجہ",
+        "current_balance": "موجودہ بیلنس",
+        "total_otps": "کل OTPs",
+        "saved_wallets": "آپ کے محفوظ کردہ والیٹ",
+        "withdraw_info": "رقم نکلوانے کی معلومات",
+        "manage_wallets": "اپنے پیمنٹ والیٹس کا انتظام کریں",
+        "refresh_prof": "🔄 پروفائل ریفریش کریں",
+        "recent_otps_btn": "📜 حالیہ OTPs",
+        "req_with_btn": "💸 رقم نکلوانے کی درخواست",
+        "select_service": "سروس منتخب کریں",
+        "no_services": "کوئی سروس شامل نہیں کی گئی",
+        "traffic_hdr": "ٹریفک سرور",
+        "traffic_desc": "سروس کا نام لکھیں (جیسے: WHATSAPP)\nروکنے کے لیے /cancel بھیجیں"
+    }
+}
+
+MAIN_MENU_BUTTONS = [
+    # English
+    "📱 𝗚𝗘𝗧 𝗡𝗨𝗠𝗕𝗘𝗥", "📊 𝗧𝗥𝗔𝗙𝗙𝗜𝗖 𝗦𝗘𝗥𝗩𝗘𝗥", "👤 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 & 𝗪𝗔𝗟𝗟𝗘𝗧", 
+    "🎁 𝗥𝗘𝗙𝗘𝗥𝗥𝗔𝗟", "🏆 𝗟𝗘𝗔𝗗𝗘𝗥𝗕𝗢𝗔𝗥𝗗", "🎧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 & 𝗛𝗘𝗟𝗣", 
+    "🔐 𝟮𝗙𝗔 𝗢𝗡𝗟𝗜𝗡𝗘", "⚙️ 𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟", "🌐 𝗟𝗔𝗡𝗚𝗨𝗔𝗚𝗘",
+    # Bengali
+    "📱 নাম্বার নিন", "📊 ট্রাফিক সার্ভার", "👤 প্রোফাইল ও ওয়ালেট", 
+    "🎁 রেফারেল", "🏆 লিডারবোর্ড", "🎧 সাপোর্ট ও সাহায্য", 
+    "🔐 ২এফএ (2FA)", "🌐 ভাষা পরিবর্তন",
+    # Hindi
+    "📱 नंबर लें", "📊 ट्रैफ़िक सर्वर", "👤 प्रोफ़ाइल और वॉलेट", 
+    "🎁 रेफ़रल", "🏆 लीडरबोर्ड", "🎧 सहायता", "🔐 2FA ऑनलाइन", "🌐 भाषा (Language)",
+    # Urdu
+    "📱 نمبر حاصل کریں", "📊 ٹریفک سرور", "👤 پروفائل اور والیٹ", 
+    "🎁 ریفرل", "🏆 لیڈر بورڈ", "🎧 مدد", "🔐 2FA آن لائن", "🌐 زبان (Language)"
+]
+
+# FIXED: Massive 100-thread pool to prevent button spam from locking the bot
+bot = telebot.TeleBot(TOKEN, num_threads=100)
+bot_info = bot.get_me()
+BOT_USERNAME = bot_info.username
+
+# Database File - Same name guarantees zero data loss
+DATA_FILE = "mino_x_sms_data_v12.json"
+
+active_polls = {}
+user_states = {}
+traffic_cooldowns = {} 
+data_lock = threading.RLock()
+
+# ============================================
+# SMART UTILITIES & HELPERS
+# ============================================
+def get_greeting(lang="en"):
+    hour = datetime.now().hour
+    if lang == "bn":
+        if hour < 12: return "🌅 শুভ সকাল"
+        elif 12 <= hour < 18: return "☀️ শুভ অপরাহ্ন"
+        else: return "🌙 শুভ সন্ধ্যা"
+    elif lang == "hi":
+        if hour < 12: return "🌅 शुभ प्रभात"
+        elif 12 <= hour < 18: return "☀️ शुभ दोपहर"
+        else: return "🌙 शुभ संध्या"
+    elif lang == "ur":
+        if hour < 12: return "🌅 صبح بخیر"
+        elif 12 <= hour < 18: return "☀️ دوپہر بخیر"
+        else: return "🌙 شام بخیر"
+    else:
+        if hour < 12: return "🌅 GOOD MORNING"
+        elif 12 <= hour < 18: return "☀️ GOOD AFTERNOON"
+        else: return "🌙 GOOD EVENING"
+
+def get_user_tier(otp_count):
+    if otp_count >= 100: return "💎 VIP"
+    elif otp_count >= 50: return "🥇 PRO"
+    elif otp_count >= 10: return "🥈 MEMBER"
+    else: return "🥉 NEWBIE"
+
+def __get_all_api_keys(main_api):
+    keys = []
+    if main_api: keys.append(main_api)
+    backups = [
+        "nxa_7367a7ca4fb9e3ec44c574f668714df61a813162",
+        "nxa_9ad17cea99f85040fde8eb4fabdbff6f47f1e613",
+        "nxa_8d0eba994ba3094177d4dc1441af4cfc65455368"
+    ]
+    for b in backups:
+        if b and b not in keys: keys.append(b)
+    return keys
+
+SERVICE_SMS_KEYWORDS = {
+    "whatsapp": ["whatsapp", "wa", "wap", "w/a", "whatsapp business"],
+    "facebook": ["facebook", "fb", "meta", "fbook"],
+    "instagram": ["instagram", "insta", "ig"],
+    "telegram": ["telegram", "tg", "tele"],
+    "google": ["google", "gmail", "youtube", "g-"],
+    "tiktok": ["tiktok", "tik tok", "tikvideo"],
+    "twitter": ["twitter", "x.com", "x code"],
+    "binance": ["binance", "bnb"],
+    "microsoft": ["microsoft", "ms", "outlook"],
+    "apple": ["apple", "icloud", "itunes"]
+}
+
+def get_service_code(service_name):
+    name = str(service_name).lower()
+    mapping = {
+        "whatsapp": "wa", "facebook": "fb", "instagram": "ig", "telegram": "tg",
+        "google": "go", "tiktok": "tt", "twitter": "tw", "binance": "bn",
+        "microsoft": "ms", "apple": "ap", "yahoo": "yh", "snapchat": "sn", 
+        "discord": "dc", "netflix": "nf", "uber": "ub"
+    }
+    for key, val in mapping.items():
+        if key in name: return val
+    return name
+
+def detect_service_from_sms(sms_text, app_name=""):
+    sms_lower = str(sms_text).lower() if sms_text else ""
+    if any(w in sms_lower for w in ["whatsapp", "wa ", " w/a"]): return "Whatsapp"
+    for service, keywords in SERVICE_SMS_KEYWORDS.items():
+        if any(kw in sms_lower for kw in keywords): return service.title()
+    return app_name.title() if app_name else "Unknown"
+
+def clean_country_name(name):
+    """ Fixes the bug where emojis randomly show up inside country names.
+    Removes emojis and unknown symbols so only pure text remains. """
+    if not name: return "Unknown"
+    # Keeping alphanumeric characters, dashes, and spaces
+    return re.sub(r'[^\w\s\-]', '', str(name)).strip()
+
+# --- Premium Flag Emoji Database ---
+COUNTRY_DATA = {
+    "united states": {"emoji": "🇺🇸", "id": "5913463998522592692"}, "usa": {"emoji": "🇺🇸", "id": "5913463998522592692"},
+    "ukraine": {"emoji": "🇺🇦", "id": "5911406692007941050"}, "poland": {"emoji": "🇵🇱", "id": "5913550391789752571"},
+    "kazakhstan": {"emoji": "🇰🇿", "id": "5913724621433082323"}, "china": {"emoji": "🇨🇳", "id": "5913779335021466780"},
+    "azerbaijan": {"emoji": "🇦🇿", "id": "5911197578640233518"}, "european union": {"emoji": "🇪🇺", "id": "5911106310585193018"},
+    "armenia": {"emoji": "🇦🇲", "id": "5913272455866093666"}, "russia": {"emoji": "🇷🇺", "id": "5913274246867456342"},
+    "russian federation": {"emoji": "🇷🇺", "id": "5913274246867456342"}, "uzbekistan": {"emoji": "🇺🇿", "id": "5911051846104912282"},
+    "germany": {"emoji": "🇩🇪", "id": "5911096835887337583"}, "japan": {"emoji": "🇯🇵", "id": "5913293711659241040"},
+    "turkey": {"emoji": "🇹🇷", "id": "5910995113881901195"}, "belarus": {"emoji": "🇧🇾", "id": "5911011185649521599"},
+    "united kingdom": {"emoji": "🇬🇧", "id": "5913443365499703513"}, "uk": {"emoji": "🇬🇧", "id": "5913443365499703513"},
+    "india": {"emoji": "🇮🇳", "id": "5913754823643107921"}, "brazil": {"emoji": "🇧🇷", "id": "5911148568768418614"},
+    "zambia": {"emoji": "🇿🇲", "id": "5913564754160389778"}, "yemen": {"emoji": "🇾🇪", "id": "5913346492512341993"},
+    "wales": {"emoji": "🏴󠁧󠁢󠁷󠁬󠁳󠁿", "id": "5911297801702084799"}, "vietnam": {"emoji": "🇻🇳", "id": "5913428887164949581"},
+    "vatican": {"emoji": "🇻🇦", "id": "5911211932420938860"}, "vanuatu": {"emoji": "🇻🇺", "id": "5913511535220625585"},
+    "uruguay": {"emoji": "🇺🇾", "id": "5913623088406204470"}, "uae": {"emoji": "🇦🇪", "id": "5913726554168365343"},
+    "united arab emirates": {"emoji": "🇦🇪", "id": "5913726554168365343"}, "uganda": {"emoji": "🇺🇬", "id": "5913488939397681980"},
+    "turkmenistan": {"emoji": "🇹🇲", "id": "5913315521503170180"}, "tunisia": {"emoji": "🇹🇳", "id": "5911332947419468671"},
+    "trinidad and tobago": {"emoji": "🇹🇹", "id": "5911228635548750294"}, "togo": {"emoji": "🇹🇬", "id": "5913423260757790970"},
+    "thailand": {"emoji": "🇹🇭", "id": "5913617968805187987"}, "tanzania": {"emoji": "🇹🇿", "id": "5911418949844603556"},
+    "tajikistan": {"emoji": "🇹🇯", "id": "5911287639809463107"}, "switzerland": {"emoji": "🇨🇭", "id": "5913271227505448072"},
+    "sweden": {"emoji": "🇸🇪", "id": "5911156510162949403"}, "swaziland": {"emoji": "🇸🇿", "id": "5913374525763883286"},
+    "suriname": {"emoji": "🇸🇷", "id": "5913275539652611719"}, "sudan": {"emoji": "🇸🇩", "id": "5911387497799094470"},
+    "spain": {"emoji": "🇪🇸", "id": "5911193287967904547"}, "sri lanka": {"emoji": "🇱🇰", "id": "5911293163137406640"},
+    "south sudan": {"emoji": "🇸🇸", "id": "5911406262511211744"}, "south africa": {"emoji": "🇿🇦", "id": "5911203119148044594"},
+    "somalia": {"emoji": "🇸🇴", "id": "5911397852965244436"}, "solomon islands": {"emoji": "🇸🇧", "id": "5911482712929080608"},
+    "slovenia": {"emoji": "🇸🇮", "id": "5913431983836368644"}, "slovakia": {"emoji": "🇸🇰", "id": "5913751666842145020"},
+    "singapore": {"emoji": "🇸🇬", "id": "5911531460808051849"}, "sierra leone": {"emoji": "🇸🇱", "id": "5911210450657218661"},
+    "seychelles": {"emoji": "🇸🇨", "id": "5911185183364616913"}, "serbia": {"emoji": "🇷🇸", "id": "5913592598433369871"},
+    "senegal": {"emoji": "🇸🇳", "id": "5910995302860461643"}, "scotland": {"emoji": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "id": "5911460091336331851"},
+    "sao tome and principe": {"emoji": "🇸🇹", "id": "5913574331937462345"}, "san marino": {"emoji": "🇸🇲", "id": "5913587968458625465"},
+    "samoa": {"emoji": "🇼🇸", "id": "5913325971158602854"}, "saint kitts and nevis": {"emoji": "🇰🇳", "id": "5913691898077253637"},
+    "saint vincent and the grenadines": {"emoji": "🇻🇨", "id": "5911318941531116255"}, "saint lucia": {"emoji": "🇱🇨", "id": "5911243659344351824"},
+    "palestine": {"emoji": "🇵🇸", "id": "5913684768431541668"}, "rwanda": {"emoji": "🇷🇼", "id": "5911455229433352234"},
+    "romania": {"emoji": "🇷🇴", "id": "5913460373570195273"}, "qatar": {"emoji": "🇶🇦", "id": "5911260864983339619"},
+    "puerto rico": {"emoji": "🇵🇷", "id": "5911504350974317480"}, "portugal": {"emoji": "🇵🇹", "id": "5911023653939581472"},
+    "philippines": {"emoji": "🇵🇭", "id": "5911268638874145162"}, "peru": {"emoji": "🇵🇪", "id": "5911207993935925780"},
+    "paraguay": {"emoji": "🇵🇾", "id": "5911014265141072316"}, "papua new guinea": {"emoji": "🇵🇬", "id": "5911107251183030903"},
+    "panama": {"emoji": "🇵🇦", "id": "5913428968769327174"}, "palau": {"emoji": "🇵🇼", "id": "5911283903187915549"},
+    "pakistan": {"emoji": "🇵🇰", "id": "5913705895375672082"}, "oman": {"emoji": "🇴🇲", "id": "5913570801474343473"},
+    "norway": {"emoji": "🇳🇴", "id": "5913617397574537046"}, "nigeria": {"emoji": "🇳🇬", "id": "5911143844304393105"},
+    "niger": {"emoji": "🇳🇪", "id": "5911270086278124251"}, "new zealand": {"emoji": "🇳🇿", "id": "5913640044937089340"},
+    "netherlands": {"emoji": "🇳🇱", "id": "5913367645226275100"}, "nepal": {"emoji": "🇳🇵", "id": "5913496520014958723"},
+    "namibia": {"emoji": "🇳🇦", "id": "5911108535378252443"}, "mozambique": {"emoji": "🇲🇿", "id": "5911333419865871464"},
+    "morocco": {"emoji": "🇲🇦", "id": "5911482111633658301"}, "montenegro": {"emoji": "🇲🇪", "id": "5913239436157522151"},
+    "mongolia": {"emoji": "🇲🇳", "id": "5911041383564580038"}, "monaco": {"emoji": "🇲🇨", "id": "5911245347266500057"},
+    "moldova": {"emoji": "🇲🇩", "id": "5913456847402045950"}, "maldives": {"emoji": "🇲🇻", "id": "5913501399097806832"},
+    "mali": {"emoji": "🇲🇱", "id": "5911305266355245916"}, "malta": {"emoji": "🇲🇹", "id": "5911023714069123567"},
+    "bermuda": {"emoji": "🇧🇲", "id": "5913680005312811090"}, "martinique": {"emoji": "🇲🇶", "id": "5911378005921370347"},
+    "marshall islands": {"emoji": "🇲🇭", "id": "5913235935759175692"}, "mauritius": {"emoji": "🇲🇺", "id": "5913291113204027321"},
+    "mexico": {"emoji": "🇲🇽", "id": "5913687302462246518"}, "micronesia": {"emoji": "🇫🇲", "id": "5911271104185373336"},
+    "malaysia": {"emoji": "🇲🇾", "id": "5913654360063087453"}, "kenya": {"emoji": "🇰🇪", "id": "5911154710571651231"},
+    "madagascar": {"emoji": "🇲🇬", "id": "5913766918271012920"}, "macedonia": {"emoji": "🇲🇰", "id": "5913394029210374721"},
+    "luxembourg": {"emoji": "🇱🇺", "id": "5913390842344640293"}, "lithuania": {"emoji": "🇱🇹", "id": "5911172315642597775"},
+    "liechtenstein": {"emoji": "🇱🇮", "id": "5911166650580734660"}, "libya": {"emoji": "🇱🇾", "id": "5911236989260140996"},
+    "liberia": {"emoji": "🇱🇷", "id": "5913324167272337727"}, "kiribati": {"emoji": "🇰🇮", "id": "5911294443037660118"},
+    "kosovo": {"emoji": "🇽🇰", "id": "5911433681582429010"}, "kuwait": {"emoji": "🇰🇼", "id": "5913290705182134003"},
+    "kyrgyzstan": {"emoji": "🇰🇬", "id": "5911202161370337549"}, "laos": {"emoji": "🇱🇦", "id": "5913718526874489279"},
+    "latvia": {"emoji": "🇱🇻", "id": "5913738489882480243"}, "lebanon": {"emoji": "🇱🇧", "id": "5911504273664905447"},
+    "lesotho": {"emoji": "🇱🇸", "id": "5911059881988723711"}, "indonesia": {"emoji": "🇮🇩", "id": "5913479361620611038"},
+    "iran": {"emoji": "🇮🇷", "id": "5911308891307643032"}, "iraq": {"emoji": "🇮🇶", "id": "5911382442622587735"},
+    "ireland": {"emoji": "🇮🇪", "id": "5913440715504881532"}, "israel": {"emoji": "🇮🇱", "id": "5911471936856134692"},
+    "italy": {"emoji": "🇮🇹", "id": "5913688444923547525"}, "jamaica": {"emoji": "🇯🇲", "id": "5913232280742006526"},
+    "jordan": {"emoji": "🇯🇴", "id": "5913234136167878475"}, "iceland": {"emoji": "🇮🇸", "id": "5911047899029967246"},
+    "hungary": {"emoji": "🇭🇺", "id": "5913767635530551104"}, "honduras": {"emoji": "🇭🇳", "id": "5911406889576436289"},
+    "haiti": {"emoji": "🇭🇹", "id": "5913459789454643194"}, "guyana": {"emoji": "🇬🇾", "id": "5913579412883771480"},
+    "guinea-bissau": {"emoji": "🇬🇼", "id": "5911398694778836149"}, "guinea": {"emoji": "🇬🇳", "id": "5913471858312744319"},
+    "guatemala": {"emoji": "🇬🇹", "id": "5913324858762072330"}, "grenada": {"emoji": "🇬🇩", "id": "5913228063084121946"},
+    "greece": {"emoji": "🇬🇷", "id": "5911210399117611448"}, "ghana": {"emoji": "🇬🇭", "id": "5913391155877252952"},
+    "georgia": {"emoji": "🇬🇪", "id": "5913434771270144023"}, "gambia": {"emoji": "🇬🇲", "id": "5913657267755945883"},
+    "gabon": {"emoji": "🇬🇦", "id": "5911037896051137264"}, "france": {"emoji": "🇫🇷", "id": "5913605586414473124"},
+    "finland": {"emoji": "🇫🇮", "id": "5911041344909873378"}, "fiji": {"emoji": "🇫🇯", "id": "5911393832875856716"},
+    "ethiopia": {"emoji": "🇪🇹", "id": "5911078333168227043"}, "dominican republic": {"emoji": "🇩🇴", "id": "5911152099231536123"},
+    "timor-leste": {"emoji": "🇹🇱", "id": "5911141915864076479"}, "ecuador": {"emoji": "🇪🇨", "id": "5911273865849347408"},
+    "egypt": {"emoji": "🇪🇬", "id": "5913694831539916769"}, "el salvador": {"emoji": "🇸🇻", "id": "5913238624408703010"},
+    "england": {"emoji": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "id": "5913475719488344315"}, "estonia": {"emoji": "🇪🇪", "id": "5910986042910969906"},
+    "dominica": {"emoji": "🇩🇲", "id": "5911377121158107430"}, "djibouti": {"emoji": "🇩🇯", "id": "5911407709915190157"},
+    "denmark": {"emoji": "🇩🇰", "id": "5911206009661034712"}, "cyprus": {"emoji": "🇨🇾", "id": "5911023550860366409"},
+    "croatia": {"emoji": "🇭🇷", "id": "5913692684056269311"}, "costa rica": {"emoji": "🇨🇷", "id": "5911261745451635030"},
+    "congo": {"emoji": "🇨🇬", "id": "5911338788574990168"}, "comoros": {"emoji": "🇰🇲", "id": "5911338582416560604"},
+    "cambodia": {"emoji": "🇰🇭", "id": "5913699998385573485"}, "cameroon": {"emoji": "🇨🇲", "id": "5911172109484167745"},
+    "canada": {"emoji": "🇨🇦", "id": "5913623736946265914"}, "cape verde": {"emoji": "🇨🇻", "id": "5913571501554012193"},
+    "central african republic": {"emoji": "🇨🇫", "id": "5913443245240619222"}, "chad": {"emoji": "🇹🇩", "id": "5913299849167507310"},
+    "czech": {"emoji": "🇨🇿", "id": "5911198691036764307"}, "chile": {"emoji": "🇨🇱", "id": "5911470957603592832"},
+    "colombia": {"emoji": "🇨🇴", "id": "5913773060074246009"}, "burundi": {"emoji": "🇧🇮", "id": "5913766441529642752"},
+    "botswana": {"emoji": "🇧🇼", "id": "5911513782722499475"}, "bosnia": {"emoji": "🇧🇦", "id": "5913700002680541032"},
+    "bolivia": {"emoji": "🇧🇴", "id": "5913638795101606133"}, "bhutan": {"emoji": "🇧🇹", "id": "5913236734623093021"},
+    "benin": {"emoji": "🇧🇯", "id": "5913735869952430547"}, "argentina": {"emoji": "🇦🇷", "id": "5913573356979884082"},
+    "australia": {"emoji": "🇦🇺", "id": "5913632326880858455"}, "austria": {"emoji": "🇦🇹", "id": "5911338831524664592"},
+    "bahamas": {"emoji": "🇧🇸", "id": "5911451643135660214"}, "bahrain": {"emoji": "🇧🇭", "id": "5913581663446634403"},
+    "bangladesh": {"emoji": "🇧🇩", "id": "5911365056594973179"}, "barbados": {"emoji": "🇧🇧", "id": "5911016996740272263"},
+    "belgium": {"emoji": "🇧🇪", "id": "5913529642802745141"}, "belize": {"emoji": "🇧🇿", "id": "5913355005137522807"},
+    "antigua": {"emoji": "🇦🇬", "id": "5913389025573475085"}, "angola": {"emoji": "🇦🇴", "id": "5913753316109586411"},
+    "andorra": {"emoji": "🇦🇩", "id": "5911314702398396902"}, "algeria": {"emoji": "🇩🇿", "id": "5913782968563800236"},
+    "albania": {"emoji": "🇦🇱", "id": "5911357458797826163"}, "afghanistan": {"emoji": "🇦🇫", "id": "5913492040364068694"},
+    "zimbabwe": {"emoji": "🇿🇼", "id": "5911092502265336396"}, "cuba": {"emoji": "🇨🇺", "id": "5431551436502611633"},
+    "north korea": {"emoji": "🇰🇵", "id": "5434142701941437163"}, "south korea": {"emoji": "🇰🇷", "id": "5911406262511211744"},
+    "venezuela": {"emoji": "🇻🇪", "id": "5434009132753499322"}, "syria": {"emoji": "🇸🇾", "id": "5433910876786670092"},
+    "myanmar": {"emoji": "🇲🇲", "id": "5433666360003540231"}, "nicaragua": {"emoji": "🇳🇮", "id": "5334807849418003620"},
+    "cote d'ivoire": {"emoji": "🇨🇮", "id": ""}, "côte d'ivoire": {"emoji": "🇨🇮", "id": ""}, "ivory coast": {"emoji": "🇨🇮", "id": ""},
+    "saudi arabia": {"emoji": "🇸🇦", "id": ""}
+}
+
+EMOJI_COLLECTION = {
+    "facebook": "🔵", 
+    "whatsapp": "🟢",
+    "whatsapp businesses": "🟢",
+    "telegram": "✈️", "Instagram": "🟣", "twitter": "𝕏", "x": "𝕏",
+    "google": "🔍", "gmail": "📧", "youtube": "🟥", "apple": "🍎",
+    "microsoft": "💻", "tiktok": "⚫", "snapchat": "👻", "binance": "🟨"
+}
+
+def get_country_flag(country_name, premium=False):
+    if not country_name: return "🌍"
+    name = str(country_name).lower().strip()
+    
+    match = None
+    if name in COUNTRY_DATA:
+        match = COUNTRY_DATA[name]
+    else:
+        for country, data in COUNTRY_DATA.items():
+            if len(country) >= 4 and (country in name or name in country):
+                match = data
+                break
+                
+    if match:
+        if premium and match.get("id"):
+            return f'<tg-emoji emoji-id="{match["id"]}">{match["emoji"]}</tg-emoji>'
+        return match["emoji"]
+        
+    return "🌍"
+
+def emo(keyword, default="🟣"):
+    if not keyword: return default
+    kw = str(keyword).lower().strip()
+    if kw in EMOJI_COLLECTION: return EMOJI_COLLECTION[kw]
+    for key, emoji in EMOJI_COLLECTION.items():
+        if len(key) >= 3 and key in kw: return emoji
+    return get_country_flag(kw) if get_country_flag(kw) != "🌍" else default
+
+def format_url(url):
+    url = url.strip()
+    if url and not url.startswith(('http://', 'https://', 'tg://')): return 'https://' + url
+    return url
+
+def extract_channel_username(url):
+    if "t.me/" in url:
+        parts = url.split("t.me/")
+        if len(parts) > 1:
+            username = parts[1].split("/")[0].split("?")[0]
+            if not username.startswith("@"): username = "@" + username
+            return username
+    return ""
+
+def mask_number(phone):
+    phone_str = str(phone).replace('+', '')
+    if len(phone_str) > 6: return f"+{phone_str[:3]}XXXX{phone_str[-3:]}"
+    return f"+{phone_str}"
+
+def safe_send(chat_id, text, reply_markup=None, message_id=None):
+    try:
+        clean_text = text 
+        if message_id:
+            return bot.edit_message_text(clean_text, chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=reply_markup)
+        else:
+            return bot.send_message(chat_id, clean_text, parse_mode="HTML", reply_markup=reply_markup)
+    except Exception:
+        return None
+
+def load_data():
+    with data_lock:
+        default_data = {
+            "users": [], "services_data": {}, "forward_groups": [], 
+            "main_otp_link": "https://t.me/", "watermark": BOT_NAME,
+            "force_join_enabled": False, "force_join_channels": [],
+            "balances": {}, "banned_users": [], "maintenance": False,
+            "api_key": NEXA_API_KEY, "otp_counts": {},
+            "wallets": {}, "referred_by": {}, "referral_paid": [], "processed_otps": [],
+            "pending_withdrawals": {},
+            "user_profiles": {}, 
+            "settings": {
+                "welcome": "WELCOME TO MINO X SMS!",
+                "support": "📝 <b>PLEASE CONTACT THE ADMINISTRATOR FOR ANY SUPPORT REQUESTS.</b>",
+                "withdraw": "📝 <b>MINIMUM WITHDRAWAL IS $0.50.</b>",
+                "leadership": "🏆 <b>TOP USERS LIST:</b>",
+                "otp_bonus": OTP_BONUS,
+                "ref_bonus": REF_BONUS,
+                "max_numbers": MAX_NUMBERS,
+                "admin_alerts": False
+            }
+        }
+        if not os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "w", encoding='utf-8') as f: json.dump(default_data, f, indent=4)
+            return default_data
+        try:
+            with open(DATA_FILE, "r", encoding='utf-8') as f:
+                content = f.read().strip()
+                if not content: return default_data
+                data = json.loads(content)
+                for key, val in default_data.items():
+                    if key not in data: data[key] = val
+                for key, val in default_data["settings"].items():
+                    if key not in data["settings"]: data["settings"][key] = val
+                return data
+        except: return default_data
+
+def save_data(data):
+    with data_lock:
+        try:
+            with open(DATA_FILE, "w", encoding='utf-8') as f: json.dump(data, f, indent=4)
+        except: pass
+
+def get_user_lang(user_id):
+    data = load_data()
+    return data.get("user_profiles", {}).get(str(user_id), {}).get("lang", "en")
+
+def add_user(user_id, username=None, first_name=None, referrer_id=None):
+    data = load_data()
+    uid_str = str(user_id)
+    changed = False
+    
+    is_new_user = False
+    if user_id not in data.setdefault("users", []):
+        data["users"].append(user_id)
+        is_new_user = True
+        changed = True
+        if referrer_id and str(referrer_id) != uid_str:
+            data.setdefault("referred_by", {})[uid_str] = str(referrer_id)
+            
+    profile = data.setdefault("user_profiles", {}).setdefault(uid_str, {})
+    if profile.get("username") != (username or "N/A"):
+        profile["username"] = username or "N/A"
+        changed = True
+    if profile.get("first_name") != (first_name or "Unknown"):
+        profile["first_name"] = first_name or "Unknown"
+        changed = True
+    if "history" not in profile: 
+        profile["history"] = []
+        changed = True
+    if "lang" not in profile:
+        profile["lang"] = "en"
+        changed = True
+    
+    if changed:
+        save_data(data)
+    
+    if is_new_user and data.get("settings", {}).get("admin_alerts", False):
+        try:
+            safe_send(ADMIN_ID, f"🔔 <b>NEW USER ALERT</b>\nID: <code>{user_id}</code>\nUser: @{username or 'N/A'}\nName: {first_name}")
+        except: pass
+
+def add_to_history(user_id, service, number, otp):
+    data = load_data()
+    uid_str = str(user_id)
+    profile = data.setdefault("user_profiles", {}).setdefault(uid_str, {})
+    history = profile.setdefault("history", [])
+    
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = {"service": service, "number": number, "otp": otp, "date": date_str}
+    history.insert(0, entry)
+    
+    if len(history) > 5:
+        profile["history"] = history[:5]
+        
+    save_data(data)
+
+def check_and_pay_referral(user_id):
+    data = load_data()
+    uid_str = str(user_id)
+    dynamic_ref_bonus = data.get("settings", {}).get("ref_bonus", REF_BONUS)
+    
+    referrer = data.get("referred_by", {}).get(uid_str)
+    if referrer and uid_str not in data.get("referral_paid", []):
+        current_bal = data.get("balances", {}).get(referrer, 0.0)
+        data.setdefault("balances", {})[referrer] = round(current_bal + dynamic_ref_bonus, 5)
+        data.setdefault("referral_paid", []).append(uid_str)
+        save_data(data)
+        try:
+            r_lang = get_user_lang(referrer)
+            bonus_amount = format_currency(dynamic_ref_bonus, r_lang)
+            if r_lang == "en":
+                msg = f"🎁 <b>REFERRAL BONUS!</b>\nYour referral joined and used the bot. You received <b>{bonus_amount}</b>!"
+            elif r_lang == "bn":
+                msg = f"🎁 <b>রেফারেল বোনাস!</b>\nআপনার রেফারেল যুক্ত হয়ে বটটি ব্যবহার করেছে। আপনি <b>{bonus_amount}</b> পেয়েছেন!"
+            elif r_lang == "hi":
+                msg = f"🎁 <b>रेफ़रल बोनस!</b>\nआपके रेफ़रल ने जुड़कर बॉट का उपयोग किया। आपको <b>{bonus_amount}</b> मिले हैं!"
+            elif r_lang == "ur":
+                msg = f"🎁 <b>ریفرل بونس!</b>\nآپ کے ریفرل نے شامل ہو کر بوٹ استعمال کیا۔ آپ کو <b>{bonus_amount}</b> مل گئے!"
+            safe_send(int(referrer), msg)
+        except: pass
+
+def is_user_allowed(user_id, chat_id=None, call_id=None):
+    if user_id == ADMIN_ID: return True
+    data = load_data()
+    lang = get_user_lang(user_id)
+    if user_id in data.get("banned_users", []):
+        if chat_id: 
+            err = "🚫 <b>YOU ARE BANNED FROM USING THIS BOT.</b>"
+            if lang == "bn": err = "🚫 <b>আপনি এই বটটি ব্যবহার করার জন্য নিষিদ্ধ।</b>"
+            elif lang == "hi": err = "🚫 <b>आपको इस बॉट का उपयोग करने से बैन किया गया है।</b>"
+            elif lang == "ur": err = "🚫 <b>آپ کو اس بوٹ استعمال کرنے سے روک دیا گیا ہے۔</b>"
+            safe_send(chat_id, err)
+        if call_id: bot.answer_callback_query(call_id, "🚫 YOU ARE BANNED!", show_alert=True)
+        return False
+    if data.get("maintenance", False):
+        if chat_id: 
+            err = "⚙️ <b>BOT IS CURRENTLY UNDER MAINTENANCE. PLEASE TRY AGAIN LATER.</b>"
+            if lang == "bn": err = "⚙️ <b>বটটি বর্তমানে মেইনটেনেন্সে আছে। অনুগ্রহ করে পরে আবার চেষ্টা করুন।</b>"
+            elif lang == "hi": err = "⚙️ <b>बॉट अभी मेंटेनेंस में है। कृपया बाद में प्रयास करें।</b>"
+            elif lang == "ur": err = "⚙️ <b>بوٹ اس وقت مینٹیننس میں ہے۔ براہ کرم بعد میں کوشش کریں۔</b>"
+            safe_send(chat_id, err)
+        if call_id: bot.answer_callback_query(call_id, "⚙️ BOT IS UNDER MAINTENANCE!", show_alert=True)
+        return False
+    return True
+
+def check_force_join(user_id):
+    if user_id == ADMIN_ID: return True 
+    data = load_data()
+    if not data.get("force_join_enabled"): return True
+    channels = data.get("force_join_channels", [])
+    if not channels: return True 
+    for link in channels:
+        chat_username = extract_channel_username(link)
+        if not chat_username: continue 
+        try:
+            member = bot.get_chat_member(chat_username, user_id)
+            if member.status not in ['member', 'administrator', 'creator']: return False 
+        except: pass
+    return True 
+
+def show_force_join_message(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    channels = data.get("force_join_channels", [])
+    
+    if lang == "bn":
+        text = f"⚠️ <b>প্রবেশাধিকার নেই</b> ⚠️\n{DIVIDER}\n📢 <b>বটটি ব্যবহার করতে আমাদের চ্যানেলে জয়েন করুন!</b>\n<b>জয়েন করার পর নিচে ক্লিক করুন!</b>\n{DIVIDER}"
+        btn_join = "📢 চ্যানেলে জয়েন করুন"
+        btn_joined = "✅ জয়েন করেছি ✅"
+    elif lang == "hi":
+        text = f"⚠️ <b>एक्सेस नहीं है</b> ⚠️\n{DIVIDER}\n📢 <b>बॉट का उपयोग करने के लिए हमारे चैनल से जुड़ें!</b>\n<b>जुड़ने के बाद नीचे क्लिक करें!</b>\n{DIVIDER}"
+        btn_join = "📢 चैनल से जुड़ें"
+        btn_joined = "✅ जुड़ गया ✅"
+    elif lang == "ur":
+        text = f"⚠️ <b>رسائی نہیں ہے</b> ⚠️\n{DIVIDER}\n📢 <b>بوٹ استعمال کرنے کے لیے ہمارے چینل میں شامل ہوں!</b>\n<b>شامل ہونے کے بعد نیچے کلک کریں!</b>\n{DIVIDER}"
+        btn_join = "📢 چینل میں شامل ہوں"
+        btn_joined = "✅ شامل ہو گیا ✅"
+    else:
+        text = f"⚠️ <b>ACCESS DENIED</b> ⚠️\n{DIVIDER}\n📢 <b>JOIN OUR CHANNELS TO USE THIS BOT!</b>\n<b>CLICK JOINED AFTER JOINING!</b>\n{DIVIDER}"
+        btn_join = "📢 JOIN CHANNEL"
+        btn_joined = "✅ JOINED ✅"
+        
+    markup = InlineKeyboardMarkup()
+    for link in channels:
+        markup.add(ibtn(btn_join, url=link, style="primary"))
+    markup.add(ibtn(btn_joined, callback_data="check_join", style="success"))
+    safe_send(chat_id, text, markup, message_id)
+
+def get_main_menu(user_id):
+    lang = get_user_lang(user_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    try:
+        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2, is_persistent=True)
+    except TypeError:
+        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+        
+    markup.add(rbtn(l["btn_sms"], "success"), rbtn(l["btn_traffic"], "primary"))
+    markup.add(rbtn(l["btn_balance"], "success"), rbtn(l["btn_referral"], "success"))
+    markup.add(rbtn(l["btn_leader"], "primary"), rbtn(l["btn_support"], "danger"))
+    markup.add(rbtn(l["btn_2fa"], "success"), rbtn(l["btn_lang"], "primary"))
+    if user_id == ADMIN_ID: markup.add(rbtn(l["btn_admin"], "primary"))
+    return markup
+
+def check_cancel(message, msg_id, fallback_func, *args):
+    text = message.text if message.text else ""
+    if not text or text == '/cancel' or text in MAIN_MENU_BUTTONS or text.startswith('/'):
+        bot.clear_step_handler_by_chat_id(message.chat.id)
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        
+        if text in MAIN_MENU_BUTTONS: 
+            handle_text(message)
+        elif text == '/start': 
+            send_welcome(message)
+        else:
+            if fallback_func: fallback_func(message.chat.id, None, *args)
+        return True
+    return False
+
+@bot.message_handler(commands=['lang', 'language'])
+def handle_lang_cmd(message):
+    show_language_menu(message.chat.id)
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    user_id = message.from_user.id
+    if not is_user_allowed(user_id, chat_id=message.chat.id): return
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    
+    referrer_id = None
+    if " " in message.text:
+        parts = message.text.split(" ")
+        if len(parts) > 1 and parts[1].startswith("ref_"):
+            try: referrer_id = int(parts[1].split("_")[1])
+            except: pass
+            
+    add_user(user_id, message.from_user.username, message.from_user.first_name, referrer_id)
+    
+    if not check_force_join(user_id):
+        show_force_join_message(message.chat.id)
+        return
+    show_main_menu(message.chat.id)
+
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    user_id = message.from_user.id
+    if not is_user_allowed(user_id, chat_id=message.chat.id): return
+    text = message.text.upper()
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    
+    add_user(user_id, message.from_user.username, message.from_user.first_name)
+    check_and_pay_referral(user_id)
+
+    if "𝗚𝗘𝗧 𝗡𝗨𝗠𝗕𝗘𝗥" in text or "GET NUMBER" in text or "SMS" in text or "নাম্বার নিন" in text or "नंबर लें" in text or "نمبر حاصل کریں" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_user_services(message.chat.id)
+    elif "𝗧𝗥𝗔𝗙𝗙𝗜𝗖 𝗦𝗘𝗥𝗩𝗘𝗥" in text or "TRAFFIC" in text or "ট্রাফিক সার্ভার" in text or "ट्रैफ़िक सर्वर" in text or "ٹریفک سرور" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_traffic_search(message.chat.id)
+    elif "𝟮𝗙𝗔 𝗢𝗡𝗟𝗜𝗡𝗘" in text or "2FA" in text or "২এফএ" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_2fa_menu(message.chat.id)
+    elif "𝗣𝗥𝗢𝗙𝗜𝗟𝗘" in text or "BALANCE" in text or "WALLET" in text or "প্রোফাইল" in text or "प्रोफ़ाइल" in text or "پروفائل" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_profile_withdraw(message.chat.id)
+    elif "𝗥𝗘𝗙𝗘𝗥𝗥𝗔𝗟" in text or "REFERRAL" in text or "রেফারেল" in text or "रेफ़रल" in text or "ریفرل" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_referral_menu(message.chat.id)
+    elif "𝗟𝗘𝗔𝗗𝗘𝗥𝗕𝗢𝗔𝗥𝗗" in text or "LEADERBOARD" in text or "লিডারবোর্ড" in text or "लीडरबोर्ड" in text or "لیڈر بورڈ" in text:
+        if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+        show_leadership(message.chat.id)
+    elif "𝗦𝗨𝗣𝗣𝗢𝗥𝗧" in text or "SUPPORT" in text or "HELP" in text or "সাপোর্ট" in text or "सहायता" in text or "مدد" in text:
+        if "PANEL" not in text and "𝗣𝗔𝗡𝗘𝗟" not in text:
+            if not check_force_join(user_id): return show_force_join_message(message.chat.id)
+            show_support(message.chat.id)
+    elif "𝗟𝗔𝗡𝗚𝗨𝗔𝗚𝗘" in text or "LANGUAGE" in text or "ভাষা" in text or "भाषा" in text or "زبان" in text:
+        show_language_menu(message.chat.id)
+    elif "𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟" in text or "ADMIN PANEL" in text:
+        if user_id == ADMIN_ID: show_admin_panel(message.chat.id)
+        else: bot.send_message(message.chat.id, f"⚠️ <b>ACCESS DENIED!</b>", parse_mode="HTML")
+    else:
+        lang = get_user_lang(user_id)
+        msg_str = "🔄 <b>MENU REFRESHED.</b>"
+        if lang == "bn": msg_str = "🔄 <b>মেনু রিফ্রেশ করা হয়েছে।</b>"
+        elif lang == "hi": msg_str = "🔄 <b>मेनू रीफ्रेश किया गया।</b>"
+        elif lang == "ur": msg_str = "🔄 <b>مینو ریفریش کر دیا گیا ہے۔</b>"
+        bot.send_message(message.chat.id, msg_str, parse_mode="HTML", reply_markup=get_main_menu(user_id))
+
+def show_language_menu(chat_id, message_id=None):
+    text = "🌐 <b>Please select your language:\nঅনুগ্রহ করে আপনার ভাষা নির্বাচন করুন:\nकृपया अपनी भाषा चुनें:\nبراہ کرم اپنی زبان کا انتخاب کریں:</b>"
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        ibtn("🇬🇧 English", callback_data="setlang_en", style="primary"),
+        ibtn("🇧🇩 বাংলা", callback_data="setlang_bn", style="success")
+    )
+    markup.add(
+        ibtn("🇮🇳 हिन्दी", callback_data="setlang_hi", style="primary"),
+        ibtn("🇵🇰 اردو", callback_data="setlang_ur", style="success")
+    )
+    safe_send(chat_id, text, markup, message_id)
+
+def show_referral_menu(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    dynamic_ref_bonus = data.get("settings", {}).get("ref_bonus", REF_BONUS)
+    ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{chat_id}" if BOT_USERNAME else "N/A"
+    
+    referrals = [uid for uid, ref_id in data.get("referred_by", {}).items() if str(ref_id) == str(chat_id)]
+    total_refs = len(referrals)
+    active_refs = len([uid for uid in referrals if uid in data.get("referral_paid", [])])
+    total_earned = active_refs * dynamic_ref_bonus
+    
+    text = f"{PR_STAR} <b>{l['btn_referral'].replace('🎁 ', '')}</b> {PR_STAR}\n{DIVIDER}\n"
+    if lang == "bn":
+        text += f"আপনার লিংক শেয়ার করুন এবং প্রতি অ্যাক্টিভ ইউজারের জন্য <b>{format_currency(dynamic_ref_bonus, lang)}</b> আয় করুন!\n\n"
+        text += f"🔗 <b>আপনার রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n"
+        text += f"👥 <b>মোট রেফারেল:</b> {total_refs}\n"
+        text += f"✅ <b>অ্যাক্টিভ রেফারেল:</b> {active_refs}\n"
+        text += f"💰 <b>মোট আয়:</b> {format_currency(total_earned, lang)}\n"
+        btn_text = "📋 লিংক কপি করুন"
+    elif lang == "hi":
+        text += f"अपना लिंक शेयर करें और हर एक्टिव यूज़र के लिए <b>{format_currency(dynamic_ref_bonus, lang)}</b> कमाएं!\n\n"
+        text += f"🔗 <b>आपका रेफ़रल लिंक:</b>\n<code>{ref_link}</code>\n\n"
+        text += f"👥 <b>कुल रेफ़रल:</b> {total_refs}\n"
+        text += f"✅ <b>एक्टिव रेफ़रल:</b> {active_refs}\n"
+        text += f"💰 <b>कुल कमाई:</b> {format_currency(total_earned, lang)}\n"
+        btn_text = "📋 लिंक कॉपी करें"
+    elif lang == "ur":
+        text += f"اپنا لنک شیئر کریں اور ہر فعال صارف کے لیے <b>{format_currency(dynamic_ref_bonus, lang)}</b> کمائیں!\n\n"
+        text += f"🔗 <b>آپ کا ریفرل لنک:</b>\n<code>{ref_link}</code>\n\n"
+        text += f"👥 <b>کل ریفرل:</b> {total_refs}\n"
+        text += f"✅ <b>فعال ریفرل:</b> {active_refs}\n"
+        text += f"💰 <b>کل کمائی:</b> {format_currency(total_earned, lang)}\n"
+        btn_text = "📋 لنک کاپی کریں"
+    else:
+        text += f"Share your link and earn <b>{format_currency(dynamic_ref_bonus, lang)}</b> for every active user that joins!\n\n"
+        text += f"🔗 <b>YOUR REFERRAL LINK:</b>\n<code>{ref_link}</code>\n\n"
+        text += f"👥 <b>Total Referrals:</b> {total_refs}\n"
+        text += f"✅ <b>Active Referrals:</b> {active_refs}\n"
+        text += f"💰 <b>Total Earned:</b> {format_currency(total_earned, lang)}\n"
+        btn_text = "📋 COPY LINK"
+        
+    text += f"{DIVIDER}"
+    
+    markup = InlineKeyboardMarkup()
+    if HAS_COPY_BTN:
+        markup.add(ibtn(btn_text, copy_text_str=ref_link, style="success"))
+    else:
+        markup.add(ibtn(btn_text, callback_data=f"cp_{ref_link}", style="success"))
+        
+    safe_send(chat_id, text, markup, message_id)
+
+def show_profile_withdraw(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    uid_str = str(chat_id)
+    bal_usd = data.get("balances", {}).get(uid_str, 0.0)
+    otp_count = data.get("otp_counts", {}).get(uid_str, 0)
+    w_text = data.get("settings", {}).get("withdraw", "WITHDRAWAL INFO")
+    watermark = data.get("watermark", BOT_NAME)
+    
+    profile = data.get("user_profiles", {}).get(uid_str, {})
+    name = profile.get("first_name", "Unknown")
+    username = profile.get("username", "N/A")
+    username_str = f"@{username}" if username != "N/A" else "N/A"
+    
+    tier = get_user_tier(otp_count)
+    
+    u_wallets = data.get("wallets", {}).get(uid_str, {})
+    wallet_display = ""
+    for w_type in ["bkash", "nagad", "rocket", "binance", "easypaisa", "jazzcash", "paytm", "upi"]:
+        if w_type in u_wallets:
+            wallet_display += f"✅ <b>{w_type.upper()}:</b> <code>{u_wallets[w_type]}</code>\n"
+            
+    if not wallet_display:
+        if lang == "bn": wallet_display = "<i>কোনো ওয়ালেট যুক্ত করা হয়নি।</i>\n"
+        elif lang == "hi": wallet_display = "<i>कोई वॉलेट नहीं जोड़ा गया।</i>\n"
+        elif lang == "ur": wallet_display = "<i>کوئی والیٹ شامل نہیں کیا گیا۔</i>\n"
+        else: wallet_display = "<i>NO WALLETS ADDED YET.</i>\n"
+    
+    text = f"👤 <b>{l['profile_hdr']}</b> 👤\n{DIVIDER}\n📛 <b>{l['name']}:</b> {html.escape(name)}\n🔗 <b>{l['username']}:</b> {username_str}\n🆔 <b>{l['user_id']}:</b> <code>{chat_id}</code>\n🎖️ <b>{l['tier']}:</b> {tier}\n{THIN_DIVIDER}\n💵 <b>{l['current_balance']}:</b> <b>{format_currency(bal_usd, lang)}</b>\n🎯 <b>{l['total_otps']}:</b> {otp_count}\n{THIN_DIVIDER}\n🏦 <b>{l['saved_wallets']}:</b>\n{wallet_display}\n🏦 <b>{l['withdraw_info']}:</b>\n<i>{w_text.upper()}</i>\n{DIVIDER}\n<b>{l['manage_wallets']}:</b>\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        ibtn(l["refresh_prof"], callback_data="refresh_profile", style="primary"),
+        ibtn(l["recent_otps_btn"], callback_data="recent_otps", style="success")
+    )
+    markup.add(ibtn(l["req_with_btn"], callback_data="req_withdraw", style="success"))
+    
+    wallet_options = ["bkash", "nagad", "rocket", "binance"]
+    if lang == "hi": wallet_options = ["paytm", "upi", "binance"]
+    elif lang == "ur": wallet_options = ["easypaisa", "jazzcash", "binance"]
+        
+    for w_type in wallet_options:
+        if w_type in u_wallets:
+            markup.add(
+                ibtn(f"✏️ CHANGE {w_type.upper()}", callback_data=f"set_wallet_{w_type}", style="primary"),
+                ibtn(f"🗑️ DEL {w_type.upper()}", callback_data=f"del_wallet_{w_type}", style="danger")
+            )
+        else:
+            markup.add(ibtn(f"💳 ADD {w_type.upper()}", callback_data=f"set_wallet_{w_type}", style="success"))
+            
+    safe_send(chat_id, text, markup, message_id)
+
+def show_recent_otps(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    uid_str = str(chat_id)
+    history = data.get("user_profiles", {}).get(uid_str, {}).get("history", [])
+    
+    if lang == "bn":
+        text = f"📜 <b>আপনার সাম্প্রতিক ওটিপি</b> 📜\n{DIVIDER}\n"
+        empty_msg = "<i>আপনি এখনও কোনো ওটিপি পাননি।</i>\n"
+        btn_back = "🔙 প্রোফাইলে ফিরে যান"
+    elif lang == "hi":
+        text = f"📜 <b>आपके हाल के OTPs</b> 📜\n{DIVIDER}\n"
+        empty_msg = "<i>आपको अभी तक कोई OTP नहीं मिला है।</i>\n"
+        btn_back = "🔙 प्रोफ़ाइल पर वापस जाएं"
+    elif lang == "ur":
+        text = f"📜 <b>آپ کے حالیہ OTPs</b> 📜\n{DIVIDER}\n"
+        empty_msg = "<i>آپ کو ابھی تک کوئی OTP موصول نہیں ہوا۔</i>\n"
+        btn_back = "🔙 پروفائل پر واپس جائیں"
+    else:
+        text = f"📜 <b>YOUR RECENT OTPS</b> 📜\n{DIVIDER}\n"
+        empty_msg = "<i>You haven't received any OTPs yet.</i>\n"
+        btn_back = "🔙 BACK TO PROFILE"
+        
+    if not history:
+        text += empty_msg
+    else:
+        for idx, entry in enumerate(history, 1):
+            text += f"<b>{idx}.</b> 📲 {entry['service'].upper()}\n"
+            text += f"📞 <code>{entry['number']}</code>\n"
+            text += f"🎯 <b>OTP:</b> <code>{entry['otp']}</code>\n"
+            text += f"🕒 {entry['date']}\n{THIN_DIVIDER}\n"
+            
+    markup = InlineKeyboardMarkup().add(ibtn(btn_back, callback_data="back_to_profile", style="danger"))
+    safe_send(chat_id, text, markup, message_id)
+    
+def show_leadership(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    l_text = data.get("settings", {}).get("leadership", "LEADERSHIP BOARD")
+    watermark = data.get("watermark", BOT_NAME)
+    otp_counts = data.get("otp_counts", {})
+    profiles = data.get("user_profiles", {})
+    
+    sorted_users = sorted(otp_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    board_text = ""
+    for idx, (uid, count) in enumerate(sorted_users, 1):
+        name = profiles.get(uid, {}).get("first_name", uid)
+        board_text += f"<b>{idx}.</b> 👤 {html.escape(name)} - <b>{count} OTPs</b>\n"
+        
+    if not board_text: 
+        if lang == "bn": board_text = "<i>কোনো ওটিপি রেকর্ড নেই।</i>\n"
+        elif lang == "hi": board_text = "<i>अभी तक कोई OTP रिकॉर्ड नहीं है।</i>\n"
+        elif lang == "ur": board_text = "<i>ابھی تک کوئی OTP ریکارڈ موجود نہیں ہے۔</i>\n"
+        else: board_text = "<i>NO OTP RECORDS YET.</i>\n"
+        
+    user_otp_count = otp_counts.get(str(chat_id), 0)
+    
+    if lang == "bn":
+        text = f"🏆 <b>লিডারবোর্ড ও ওটিপি সংখ্যা</b> 🏆\n{DIVIDER}\n{l_text.upper()}\n\n🎯 <b>আপনার মোট ওটিপি: {user_otp_count}</b>\n\n📊 <b>শীর্ষ ১০ ব্যবহারকারী:</b>\n{board_text}{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    elif lang == "hi":
+        text = f"🏆 <b>लीडरबोर्ड और OTP काउंट</b> 🏆\n{DIVIDER}\n{l_text.upper()}\n\n🎯 <b>आपके कुल OTPs: {user_otp_count}</b>\n\n📊 <b>शीर्ष 10 यूज़र्स:</b>\n{board_text}{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    elif lang == "ur":
+        text = f"🏆 <b>لیڈر بورڈ اور OTP کی تعداد</b> 🏆\n{DIVIDER}\n{l_text.upper()}\n\n🎯 <b>آپ کے کل OTPs: {user_otp_count}</b>\n\n📊 <b>سرفہرست 10 صارفین:</b>\n{board_text}{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    else:
+        text = f"🏆 <b>LEADERBOARD & OTP COUNT</b> 🏆\n{DIVIDER}\n{l_text.upper()}\n\n🎯 <b>YOUR TOTAL OTPS: {user_otp_count}</b>\n\n📊 <b>TOP 10 USERS:</b>\n{board_text}{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+        
+    safe_send(chat_id, text, None, message_id)
+    
+def show_support(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    s_text = data.get("settings", {}).get("support", "SUPPORT INFO")
+    watermark = data.get("watermark", BOT_NAME)
+    
+    if lang == "bn":
+        text = f"🎧 <b>সাপোর্ট ও সাহায্য কেন্দ্র</b> 🎧\n{DIVIDER}\n{s_text.upper()}\n{THIN_DIVIDER}\n❓ <b>কীভাবে ব্যবহার করবেন:</b>\n1️⃣ 'নাম্বার নিন' ব্যবহার করে একটি সার্ভিস নির্বাচন করুন।\n2️⃣ নাম্বার পেতে একটি দেশ নির্বাচন করুন।\n3️⃣ নাম্বারটি কপি করে OTP-এর জন্য আবেদন করুন।\n4️⃣ কোড পাওয়ার জন্য বটে অপেক্ষা করুন!\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    elif lang == "hi":
+        text = f"🎧 <b>सहायता और सपोर्ट केंद्र</b> 🎧\n{DIVIDER}\n{s_text.upper()}\n{THIN_DIVIDER}\n❓ <b>कैसे इस्तेमाल करें:</b>\n1️⃣ 'नंबर लें' से सर्विस चुनें।\n2️⃣ नंबर पाने के लिए एक देश चुनें।\n3️⃣ नंबर कॉपी करें और OTP का अनुरोध करें।\n4️⃣ कोड के लिए बॉट में प्रतीक्षा करें!\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    elif lang == "ur":
+        text = f"🎧 <b>مدد اور سپورٹ سینٹر</b> 🎧\n{DIVIDER}\n{s_text.upper()}\n{THIN_DIVIDER}\n❓ <b>استعمال کرنے کا طریقہ:</b>\n1️⃣ 'نمبر حاصل کریں' سے سروس منتخب کریں۔\n2️⃣ نمبر حاصل کرنے کے لیے ایک ملک منتخب کریں۔\n3️⃣ نمبر کاپی کریں اور OTP کی درخواست کریں۔\n4️⃣ کوڈ کے لیے بوٹ میں انتظار کریں!\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    else:
+        text = f"🎧 <b>SUPPORT & HELP CENTER</b> 🎧\n{DIVIDER}\n{s_text.upper()}\n{THIN_DIVIDER}\n❓ <b>HOW TO USE:</b>\n1️⃣ Use 'Get Number' to select a service.\n2️⃣ Choose a country to get a number.\n3️⃣ Copy the number & request OTP.\n4️⃣ Wait in the bot for the code!\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+        
+    safe_send(chat_id, text, None, message_id)
+
+def show_2fa_menu(chat_id, message_id=None):
+    lang = get_user_lang(chat_id)
+    if lang == "bn":
+        text = f"🔴 <b><i><u>নিরাপদ 2FA কোড তৈরি করুন</u></i></b> 🔴\n\n<b><i><u>এগিয়ে যেতে নিচের বোতামে ক্লিক করুন</u></i></b>"
+        btn = "🔐 2FA কোড তৈরি করুন"
+    elif lang == "hi":
+        text = f"🔴 <b><i><u>सुरक्षित 2FA कोड जनरेट करें</u></i></b> 🔴\n\n<b><i><u>आगे बढ़ने के लिए नीचे दिए गए बटन पर क्लिक करें</u></i></b>"
+        btn = "🔐 2FA कोड बनाएं"
+    elif lang == "ur":
+        text = f"🔴 <b><i><u>محفوظ 2FA کوڈ بنائیں</u></i></b> 🔴\n\n<b><i><u>آگے بڑھنے کے لیے نیچے دیے گئے بٹن پر کلک کریں</u></i></b>"
+        btn = "🔐 2FA کوڈ بنائیں"
+    else:
+        text = f"🔴 <b><i><u>GENERATE SECURE 2FA CODES</u></i></b> 🔴\n\n<b><i><u>CLICK THE BUTTON BELOW TO PROCEED</u></i></b>"
+        btn = "🔐 GENERATE 2FA CODE"
+        
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(ibtn(btn, callback_data="2fa_generate", style="success"))
+    safe_send(chat_id, text, markup, message_id)
+
+def show_main_menu(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    bal_usd = data.get("balances", {}).get(str(chat_id), 0.0)
+    welcome_msg = data.get("settings", {}).get("welcome", "WELCOME TO MINO X SMS!")
+    watermark = data.get("watermark", BOT_NAME)
+    
+    profile = data.get("user_profiles", {}).get(str(chat_id), {})
+    name = profile.get("first_name", "USER")
+    greeting = get_greeting(lang)
+    
+    text = f"{PR_GEM} <b>{welcome_msg.upper()}</b> {PR_GEM}\n{DIVIDER}\n{greeting}, <b>{html.escape(name.upper())}</b>!\n💳 <b>{l['balance']}:</b> <b>{format_currency(bal_usd, lang)}</b>\n{DIVIDER}\n🔰 <b>{l['features']}:</b>\n▹ {l['btn_sms']}\n▹ {l['btn_traffic']}\n▹ {l['btn_balance']}\n▹ {l['btn_referral']}\n▹ {l['btn_leader']}\n▹ {l['btn_support']}\n▹ {l['btn_2fa']}\n▹ {l['btn_lang']}\n{DIVIDER}\n{PR_FIRE} <b>{watermark}</b> {PR_FIRE}"
+    safe_send(chat_id, text, get_main_menu(chat_id), message_id)
+
+def show_user_services(chat_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    markup = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for srv_id, srv in data.get("services_data", {}).items():
+        buttons.append(ibtn(f"{emo(srv['name'])} {srv['name'].upper()}", callback_data=f"usr_s|{srv_id}", style="primary"))
+    if buttons: markup.add(*buttons)
+    else: markup.add(ibtn(f"❌ {l['no_services']}", callback_data="ignore", style="danger"))
+    text = f"📱 <b>{l['select_service']}</b>\n{DIVIDER}"
+    safe_send(chat_id, text, markup, message_id)
+
+def show_traffic_search(chat_id, message_id=None):
+    lang = get_user_lang(chat_id)
+    l = LANG_DICT.get(lang, LANG_DICT["en"])
+    btn_close = "❌ CLOSE"
+    if lang == "bn": btn_close = "❌ বন্ধ করুন"
+    elif lang == "hi": btn_close = "❌ बंद करें"
+    elif lang == "ur": btn_close = "❌ بند کریں"
+    
+    markup = InlineKeyboardMarkup().add(ibtn(btn_close, callback_data="close_menu", style="danger"))
+    text = f"📊 <b>{l['traffic_hdr']}</b> 📊\n{DIVIDER}\n<b>{l['traffic_desc']}</b>\n{DIVIDER}"
+    if not message_id:
+        msg = safe_send(chat_id, text, markup)
+        if msg: bot.register_next_step_handler_by_chat_id(chat_id, process_api_traffic_search, msg.message_id)
+    else:
+        safe_send(chat_id, text, markup, message_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_api_traffic_search, message_id)
+
+def show_user_countries(chat_id, srv_id, message_id=None):
+    data = load_data()
+    lang = get_user_lang(chat_id)
+    srv_data = data.get("services_data", {}).get(srv_id)
+    if not srv_data: return
+    markup = InlineKeyboardMarkup(row_width=2)
+    countries = srv_data.get("countries", {})
+    
+    if lang == "bn":
+        txt_oos = "❌ স্টক আউট"
+        txt_auto = "🎲 স্বয়ংক্রিয় দেশ নির্বাচন 🎲"
+        txt_back = "🔙 ফিরে যান"
+        txt_hdr = "দেশ নির্বাচন করুন"
+    elif lang == "hi":
+        txt_oos = "❌ आउट ऑफ़ स्टॉक"
+        txt_auto = "🎲 ऑटो सेलेक्ट देश 🎲"
+        txt_back = "🔙 वापस जाएं"
+        txt_hdr = "देश चुनें"
+    elif lang == "ur":
+        txt_oos = "❌ آؤٹ آف اسٹاک"
+        txt_auto = "🎲 خودکار ملک کا انتخاب 🎲"
+        txt_back = "🔙 واپس"
+        txt_hdr = "ملک منتخب کریں"
+    else:
+        txt_oos = "❌ OUT OF STOCK"
+        txt_auto = "🎲 𝗔𝗨𝗧𝗢 𝗦𝗘𝗟𝗘𝗖𝗧 𝗖𝗢𝗨𝗡𝗧𝗥𝗬 🎲"
+        txt_back = "🔙 BACK"
+        txt_hdr = "SELECT COUNTRY"
+    
+    if not countries:
+        markup.add(ibtn(txt_oos, callback_data="ignore", style="danger"))
+    else:
+        markup.add(ibtn(txt_auto, callback_data=f"usr_auto_cnt|{srv_id}", style="success"))
+        buttons = []
+        for cnt_id, cnt in countries.items():
+            # Apply safe cleaning to avoid buggy emojis internally mixing with names
+            safe_name = clean_country_name(cnt['name'])
+            flag = get_country_flag(safe_name)
+            range_count = len(cnt.get("ranges", {}))
+            buttons.append(ibtn(f"{flag} {safe_name.upper()} [📦 {range_count}]", callback_data=f"usr_c|{srv_id}|{cnt_id}", style="primary"))
+        markup.add(*buttons)
+    markup.add(ibtn(txt_back, callback_data="back_to_user_services", style="danger"))
+    text = f"🌍 <b>{txt_hdr}</b>\n{DIVIDER}\n{emo(srv_data['name'])} <b>{html.escape(srv_data['name'].upper())}</b>"
+    safe_send(chat_id, text, markup, message_id)
+
+# --- NEW CENTRALIZED ADMIN PANEL ---
+def show_admin_panel(chat_id, message_id=None):
+    data = load_data()
+    watermark = data.get("watermark", BOT_NAME)
+    total_ranges = sum(len(cnt.get("ranges", {})) for srv in data.get("services_data", {}).values() for cnt in srv.get("countries", {}).values())
+    total_otps = sum(data.get("otp_counts", {}).values())
+    
+    text = f"👑 <b>ADMIN PANEL</b> 👑\n{DIVIDER}\n📊 <b>DATABASE STATS</b>\n{THIN_DIVIDER}\n👤 <b>TOTAL USERS:</b> <code>{len(data.get('users', []))}</code>\n📱 <b>TOTAL RANGES:</b> <code>{total_ranges}</code>\n🎯 <b>TOTAL OTPS:</b> <code>{total_otps}</code>\n🚫 <b>BANNED USERS:</b> <code>{len(data.get('banned_users', []))}</code>\n{DIVIDER}\n{PR_GEM} <b>{watermark}</b> {PR_GEM}"
+    
+    m_state = "🟢 ON" if data.get("maintenance") else "🔴 OFF"
+    alerts_state = "🟢 ON" if data.get("settings", {}).get("admin_alerts") else "🔴 OFF"
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    # The new Centralized User Management Button
+    markup.add(ibtn("🔍 SEARCH & MANAGE USER", "admin_search_user", style="success"))
+    
+    markup.add(ibtn("🛠️ MANAGE SERVICES", "admin_manage_service", style="primary"), ibtn("🔗 GROUP SETTINGS", "admin_group_settings", style="primary"))
+    markup.add(ibtn("📣 FORCE JOIN", "admin_force_join", style="primary"), ibtn("💎 SET WATERMARK", "admin_set_watermark", style="primary"))
+    markup.add(ibtn("📢 BROADCAST", "admin_broadcast", style="primary"), ibtn("📝 WELCOME & WITHDRAW", "admin_edit_texts", style="primary"))
+    markup.add(ibtn("🏆 EDIT LEADERBOARD", "admin_edit_leadership", style="primary"), ibtn("🎧 EDIT SUPPORT", "admin_edit_support", style="primary"))
+    
+    markup.add(ibtn(f"⚙️ MAINTENANCE: {m_state}", "admin_maintenance", style="danger"), ibtn("🔑 API KEY", "admin_api_key", style="primary"))
+    markup.add(ibtn("🎁 REWARD ALL (USD)", "admin_reward_all", style="success"), ibtn("➖ DEDUCT ALL (USD)", "admin_deduct_all", style="danger"))
+    
+    markup.add(ibtn("📥 EXPORT ALL DATA", "admin_export_data", style="success"), ibtn("💾 BACKUP DATABASE", "admin_backup_db", style="success")) 
+    markup.add(ibtn("🧹 RESET ALL OTPS", "admin_reset_otp", style="danger"))
+    
+    # -----------------------------------------------------
+    # 10 NEW ADMIN PANEL FEATURES ADDED BELOW
+    # -----------------------------------------------------
+    markup.add(ibtn("👥 USER LIST (ID & NAME)", "admin_user_list", style="primary"), ibtn("✉️ MSG A USER", "admin_msg_user", style="primary"))
+    markup.add(ibtn("🚫 DIRECT BAN", "admin_direct_ban", style="danger"), ibtn("✅ DIRECT UNBAN", "admin_direct_unban", style="success"))
+    markup.add(ibtn("🧹 CLEAR BAN LIST", "admin_clear_banned", style="danger"), ibtn("📈 SERVER STATS", "admin_server_stats", style="primary"))
+    markup.add(ibtn("💰 EDIT OTP BONUS", "admin_edit_otp_bonus", style="success"), ibtn("🎁 EDIT REF BONUS", "admin_edit_ref_bonus", style="success"))
+    markup.add(ibtn("📱 EDIT MAX NUMS", "admin_edit_max_nums", style="primary"), ibtn(f"🔔 ADMIN ALERTS: {alerts_state}", "admin_alerts_toggle", style="primary"))
+    
+    safe_send(chat_id, text, markup, message_id)
+
+def show_admin_services(chat_id, message_id=None):
+    data = load_data()
+    markup = InlineKeyboardMarkup(row_width=2)
+    for srv_id, srv in data.get("services_data", {}).items(): 
+        markup.add(ibtn(f"📁 {srv['name'].upper()}", callback_data=f"adm_s|{srv_id}", style="primary"))
+    markup.add(ibtn("➕ ADD SERVICE", callback_data="add_srv", style="success"))
+    markup.add(ibtn("🔙 BACK", callback_data="back_to_admin", style="danger"))
+    safe_send(chat_id, f"⚙️ <b>MANAGE SERVICES</b>\n{DIVIDER}\n<b>SELECT A SERVICE:</b>", markup, message_id)
+
+def show_admin_countries(chat_id, srv_id, message_id=None):
+    data = load_data()
+    srv_data = data.get("services_data", {}).get(srv_id)
+    if not srv_data: return
+    markup = InlineKeyboardMarkup(row_width=2)
+    for cnt_id, cnt in srv_data.get("countries", {}).items(): 
+        safe_name = clean_country_name(cnt['name'])
+        flag = get_country_flag(safe_name)
+        markup.add(ibtn(f"{flag} {safe_name.upper()}", callback_data=f"adm_c|{srv_id}|{cnt_id}", style="primary"))
+    markup.add(ibtn("➕ ADD COUNTRY", callback_data=f"add_cnt|{srv_id}", style="success"))
+    markup.add(ibtn(f"🗑️ DELETE SERVICE", callback_data=f"del_srv|{srv_id}", style="danger"))
+    markup.add(ibtn("🔙 BACK", callback_data="admin_manage_service", style="danger"))
+    safe_send(chat_id, f"🌍 <b>COUNTRIES → {html.escape(srv_data['name'].upper())}</b>\n{DIVIDER}\n<b>SELECT COUNTRY:</b>", markup, message_id)
+
+def show_admin_ranges(chat_id, srv_id, cnt_id, message_id=None):
+    data = load_data()
+    srv_data = data.get("services_data", {}).get(srv_id)
+    cnt_data = srv_data.get("countries", {}).get(cnt_id) if srv_data else None
+    if not cnt_data: return
+    safe_name = clean_country_name(cnt_data['name'])
+    flag = get_country_flag(safe_name, premium=True)
+    markup = InlineKeyboardMarkup(row_width=1)
+    for rng_id, rng_val in cnt_data.get("ranges", {}).items(): 
+        markup.add(ibtn(f"❌ {rng_val}", callback_data=f"del_rng|{srv_id}|{cnt_id}|{rng_id}", style="danger"))
+    markup.add(ibtn("➕ ADD RANGE", callback_data=f"add_rng|{srv_id}|{cnt_id}", style="success"))
+    markup.add(ibtn(f"🗑️ DELETE COUNTRY", callback_data=f"del_cnt|{srv_id}|{cnt_id}", style="danger"))
+    markup.add(ibtn("🔙 BACK", callback_data=f"adm_s|{srv_id}", style="primary"))
+    safe_send(chat_id, f"{flag} <b>RANGES → {html.escape(srv_data['name'].upper())} → {html.escape(safe_name.upper())}</b>\n{DIVIDER}\n<b>TAP TO DELETE:</b>", markup, message_id)
+
+def get_force_join_menu():
+    data = load_data()
+    is_enabled = data.get("force_join_enabled", False)
+    channels = data.get("force_join_channels", [])
+    status_text = "🟢 ENABLED" if is_enabled else "🔴 DISABLED"
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(ibtn(f"TOGGLE: {status_text}", callback_data="toggle_force_join", style="success" if is_enabled else "danger"))
+    for idx, link in enumerate(channels):
+        markup.add(ibtn(f"❌ REMOVE: {link}", callback_data=f"delfjc_{idx}", style="danger"))
+    markup.add(ibtn("➕ ADD CHANNEL", callback_data="add_fjc", style="success"))
+    markup.add(ibtn("🔙 BACK", callback_data="back_to_admin", style="primary"))
+    return markup
+
+def get_group_settings_menu():
+    data = load_data()
+    markup = InlineKeyboardMarkup(row_width=1)
+    otp_link = data.get("main_otp_link", "")
+    markup.add(ibtn("🔗 SET OTP GROUP LINK", callback_data="set_main_otp_link", style="primary"))
+    if otp_link and otp_link != "https://t.me/":
+        markup.add(ibtn("🗑️ REMOVE OTP LINK", callback_data="del_main_otp_link", style="danger"))
+    markup.add(ibtn("➕ ADD FORWARD GROUP", callback_data="add_fwd_group", style="success"))
+    fwd_groups = data.get("forward_groups", [])
+    if fwd_groups:
+        markup.add(ibtn("📋 ADDED GROUPS 📋", callback_data="ignore", style="primary"))
+        for grp in fwd_groups:
+            btn_count = len(grp.get('buttons', []))
+            markup.add(ibtn(f"⚙️ {grp['chat_id']} [{btn_count} BTNS]", callback_data=f"editgrp_{grp['chat_id']}", style="primary"))
+    markup.add(ibtn("🔙 BACK", callback_data="back_to_admin", style="danger"))
+    return markup
+
+def show_edit_group_menu(chat_id, grp_id, message_id=None):
+    data = load_data()
+    grp = next((g for g in data.get("forward_groups", []) if str(g["chat_id"]) == str(grp_id)), None)
+    if not grp:
+        safe_send(chat_id, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), message_id)
+        return
+    text = f"⚙️ <b>MANAGE GROUP</b>\n{DIVIDER}\n📱 <b>ID:</b> <code>{grp_id}</code>\n🔘 <b>BUTTONS:</b> {len(grp.get('buttons', []))}"
+    markup = InlineKeyboardMarkup(row_width=1)
+    for idx, btn in enumerate(grp.get("buttons", [])):
+        markup.add(ibtn(f"❌ {btn['name'].upper()}", callback_data=f"delgrpbtn_{grp_id}_{idx}", style="danger"))
+    markup.add(ibtn("➕ ADD BUTTON", callback_data=f"addgrpbtn_{grp_id}", style="success"))
+    markup.add(ibtn("🗑️ DELETE GROUP", callback_data=f"delfwd_{grp_id}", style="danger"))
+    markup.add(ibtn("🔙 BACK", callback_data="admin_group_settings", style="primary"))
+    safe_send(chat_id, text, markup, message_id)
+
+def process_withdraw_amount(message, msg_id, max_bal_usd):
+    if check_cancel(message, msg_id, show_profile_withdraw): return
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    
+    lang = get_user_lang(message.chat.id)
+    
+    try:
+        amt_local = float(message.text.strip())
+        amt_usd = convert_to_usd(amt_local, lang)
+        
+        min_usd = 0.50
+        if amt_usd < min_usd:
+            err_msg = f"❌ <b>MINIMUM WITHDRAWAL IS {format_currency(min_usd, lang)}.</b>"
+            if lang == "bn": err_msg = f"❌ <b>সর্বনিম্ন উত্তোলন {format_currency(min_usd, lang)}।</b>"
+            elif lang == "hi": err_msg = f"❌ <b>न्यूनतम निकासी {format_currency(min_usd, lang)} है।</b>"
+            elif lang == "ur": err_msg = f"❌ <b>کم از کم رقم نکلوانے کی حد {format_currency(min_usd, lang)} ہے۔</b>"
+            bot.send_message(message.chat.id, err_msg, parse_mode="HTML")
+            show_profile_withdraw(message.chat.id, None)
+            return
+            
+        if amt_usd > max_bal_usd:
+            err_msg = f"❌ <b>INSUFFICIENT BALANCE. (Max: {format_currency(max_bal_usd, lang)})</b>"
+            if lang == "bn": err_msg = f"❌ <b>অপর্যাপ্ত ব্যালেন্স। (সর্বোচ্চ: {format_currency(max_bal_usd, lang)})</b>"
+            elif lang == "hi": err_msg = f"❌ <b>अपर्याप्त बैलेंस। (अधिकतम: {format_currency(max_bal_usd, lang)})</b>"
+            elif lang == "ur": err_msg = f"❌ <b>ناکافی بیلنس۔ (زیادہ سے زیادہ: {format_currency(max_bal_usd, lang)})</b>"
+            bot.send_message(message.chat.id, err_msg, parse_mode="HTML")
+            show_profile_withdraw(message.chat.id, None)
+            return
+            
+        data = load_data()
+        uid_str = str(message.chat.id)
+        req_id = "wd_" + str(uuid.uuid4())[:8]
+        
+        # Deduct balance internally in USD
+        data["balances"][uid_str] = round(max_bal_usd - amt_usd, 5)
+        
+        # Save withdrawal request in USD
+        data.setdefault("pending_withdrawals", {})[req_id] = {
+            "user_id": uid_str,
+            "amount": amt_usd,
+            "wallets": data.get("wallets", {}).get(uid_str, {}),
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        save_data(data)
+        
+        # Notify User
+        ok_msg = f"✅ <b>WITHDRAWAL REQUEST SENT!</b>\nAmount: <b>{format_currency(amt_usd, lang)}</b>\nPlease wait for admin approval."
+        if lang == "bn": ok_msg = f"✅ <b>উত্তোলনের আবেদন পাঠানো হয়েছে!</b>\nপরিমাণ: <b>{format_currency(amt_usd, lang)}</b>\nঅনুগ্রহ করে এডমিন অনুমোদনের জন্য অপেক্ষা করুন।"
+        elif lang == "hi": ok_msg = f"✅ <b>निकासी का अनुरोध भेजा गया!</b>\nराशि: <b>{format_currency(amt_usd, lang)}</b>\nकृपया एडमिन की मंज़ूरी का इंतज़ार करें।"
+        elif lang == "ur": ok_msg = f"✅ <b>رقم نکلوانے کی درخواست بھیج دی گئی!</b>\nرقم: <b>{format_currency(amt_usd, lang)}</b>\nبراہ کرم ایڈمن کی منظوری کا انتظار کریں۔"
+        
+        bot.send_message(message.chat.id, ok_msg, parse_mode="HTML")
+        show_profile_withdraw(message.chat.id, None)
+        
+        # Notify Admin (Always in USD)
+        admin_msg = f"🔔 <b>NEW WITHDRAWAL REQUEST</b> 🔔\n{DIVIDER}\n"
+        admin_msg += f"👤 <b>USER ID:</b> <code>{uid_str}</code>\n"
+        admin_msg += f"💸 <b>AMOUNT:</b> <b>${amt_usd:.5f}</b>\n\n"
+        admin_msg += "🏦 <b>USER WALLETS:</b>\n"
+        for w, addr in data.get("wallets", {}).get(uid_str, {}).items():
+            admin_msg += f"   - {w.upper()}: <code>{addr}</code>\n"
+            
+        admin_markup = InlineKeyboardMarkup(row_width=2)
+        admin_markup.add(
+            ibtn("✅ APPROVE", callback_data=f"adm_wd_app_{req_id}", style="success"),
+            ibtn("❌ REJECT (REFUND)", callback_data=f"adm_wd_rej_{req_id}", style="danger")
+        )
+        safe_send(ADMIN_ID, admin_msg, admin_markup)
+        
+    except ValueError:
+        err_msg = "❌ <b>INVALID AMOUNT FORMAT.</b>"
+        if lang == "bn": err_msg = "❌ <b>ভুল পরিমাণের ধরন।</b>"
+        elif lang == "hi": err_msg = "❌ <b>अमान्य राशि प्रारूप।</b>"
+        elif lang == "ur": err_msg = "❌ <b>رقم کا فارمیٹ غلط ہے۔</b>"
+        bot.send_message(message.chat.id, err_msg, parse_mode="HTML")
+        show_profile_withdraw(message.chat.id, None)
+
+# --- Callbacks ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    bot.clear_step_handler_by_chat_id(call.message.chat.id)
+
+    user_id = call.from_user.id
+    if not is_user_allowed(user_id, call_id=call.id): return
+
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+    data = load_data()
+    api_key = data.get("api_key", NEXA_API_KEY)
+    lang = get_user_lang(chat_id)
+    
+    if call.data == "ignore": return
+    
+    # Language Selection Callback
+    if call.data.startswith("setlang_"):
+        new_lang = call.data.split("_")[1]
+        uid_str = str(chat_id)
+        data.setdefault("user_profiles", {}).setdefault(uid_str, {})["lang"] = new_lang
+        save_data(data)
+        alert_msg = "✅ Language updated!"
+        if new_lang == "bn": alert_msg = "✅ ভাষা আপডেট করা হয়েছে!"
+        elif new_lang == "hi": alert_msg = "✅ भाषा अपडेट हो गई!"
+        elif new_lang == "ur": alert_msg = "✅ زبان تبدیل کر دی گئی!"
+            
+        bot.answer_callback_query(call.id, alert_msg, show_alert=True)
+        try: bot.delete_message(chat_id, msg_id)
+        except: pass
+        show_main_menu(chat_id, None)
+        return
+    
+    # Profile Callbacks
+    if call.data == "refresh_profile":
+        ok_msg = "✅ Profile Updated Successfully!"
+        if lang == "bn": ok_msg = "✅ প্রোফাইল সফলভাবে আপডেট হয়েছে!"
+        elif lang == "hi": ok_msg = "✅ प्रोफ़ाइल सफलतापूर्वक अपडेट हो गई!"
+        elif lang == "ur": ok_msg = "✅ پروفائل کامیابی سے اپ ڈیٹ ہو گیا!"
+        bot.answer_callback_query(call.id, ok_msg, show_alert=True)
+        show_profile_withdraw(chat_id, msg_id)
+        return
+    elif call.data == "recent_otps":
+        show_recent_otps(chat_id, msg_id)
+        return
+    elif call.data == "back_to_profile":
+        show_profile_withdraw(chat_id, msg_id)
+        return
+    elif call.data == "req_withdraw":
+        data = load_data()
+        uid_str = str(chat_id)
+        bal_usd = data.get("balances", {}).get(uid_str, 0.0)
+        min_usd = 0.50
+        
+        if bal_usd < min_usd:
+            err = f"❌ MINIMUM WITHDRAWAL IS {format_currency(min_usd, lang)}!"
+            if lang == "bn": err = f"❌ সর্বনিম্ন উত্তোলন {format_currency(min_usd, lang)}!"
+            elif lang == "hi": err = f"❌ न्यूनतम निकासी {format_currency(min_usd, lang)} है!"
+            elif lang == "ur": err = f"❌ کم از کم رقم نکلوانے کی حد {format_currency(min_usd, lang)} ہے!"
+            bot.answer_callback_query(call.id, err, show_alert=True)
+            return
+            
+        u_wallets = data.get("wallets", {}).get(uid_str, {})
+        if not u_wallets:
+            err = "❌ PLEASE ADD A WALLET FIRST!"
+            if lang == "bn": err = "❌ প্রথমে একটি ওয়ালেট যোগ করুন!"
+            elif lang == "hi": err = "❌ कृपया पहले वॉलेट जोड़ें!"
+            elif lang == "ur": err = "❌ براہ کرم پہلے والیٹ شامل کریں!"
+            bot.answer_callback_query(call.id, err, show_alert=True)
+            return
+            
+        btn_cn = "🔙 CANCEL"
+        if lang == "bn": btn_cn = "🔙 বাতিল করুন"
+        elif lang == "hi": btn_cn = "🔙 रद्द करें"
+        elif lang == "ur": btn_cn = "🔙 منسوخ کریں"
+            
+        markup = InlineKeyboardMarkup().add(ibtn(btn_cn, callback_data="back_to_profile", style="danger"))
+        txt = f"💸 <b>SEND THE AMOUNT TO WITHDRAW (Min: {format_currency(min_usd, lang)}, Max: {format_currency(bal_usd, lang)}):</b>"
+        if lang == "bn": txt = f"💸 <b>উত্তোলন করতে পরিমাণ লিখুন (সর্বনিম্ন: {format_currency(min_usd, lang)}, সর্বোচ্চ: {format_currency(bal_usd, lang)}):</b>"
+        elif lang == "hi": txt = f"💸 <b>निकासी के लिए राशि भेजें (न्यूनतम: {format_currency(min_usd, lang)}, अधिकतम: {format_currency(bal_usd, lang)}):</b>"
+        elif lang == "ur": txt = f"💸 <b>رقم نکلوانے کے لیے مقدار درج کریں (کم از کم: {format_currency(min_usd, lang)}، زیادہ سے زیادہ: {format_currency(bal_usd, lang)}):</b>"
+            
+        safe_send(chat_id, txt, markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_withdraw_amount, msg_id, bal_usd)
+        return
+    
+    # 2FA 
+    if call.data == "2fa_back":
+        try: bot.delete_message(chat_id, msg_id)
+        except: pass
+        return
+    elif call.data == "2fa_generate":
+        btn_cn = "🔙 CANCEL"
+        if lang == "bn": btn_cn = "🔙 বাতিল করুন"
+        elif lang == "hi": btn_cn = "🔙 रद्द करें"
+        elif lang == "ur": btn_cn = "🔙 منسوخ کریں"
+            
+        markup = InlineKeyboardMarkup().add(ibtn(btn_cn, callback_data="2fa_back", style="danger"))
+        if lang == "bn":
+            text = f"🔴 <b><i><u>আপনার 2FA সিক্রেট কী লিখুন</u></i></b> 🔴\n\n<b><i><u>উদাহরণ: JBSWY3DPEHPK3PXP</u></i></b>\n\n<b><i><u>বন্ধ করতে /cancel লিখুন</u></i></b>"
+        elif lang == "hi":
+            text = f"🔴 <b><i><u>अपनी 2FA सीक्रेट की (Key) दर्ज़ करें</u></i></b> 🔴\n\n<b><i><u>उदाहरण: JBSWY3DPEHPK3PXP</u></i></b>\n\n<b><i><u>रोकने के लिए /cancel भेजें</u></i></b>"
+        elif lang == "ur":
+            text = f"🔴 <b><i><u>اپنی 2FA سیکرٹ کی (Key) درج کریں</u></i></b> 🔴\n\n<b><i><u>مثال: JBSWY3DPEHPK3PXP</u></i></b>\n\n<b><i><u>روکنے کے لیے /cancel بھیجیں</u></i></b>"
+        else:
+            text = f"🔴 <b><i><u>ENTER YOUR 2FA SECRET KEY</u></i></b> 🔴\n\n<b><i><u>EXAMPLE: JBSWY3DPEHPK3PXP</u></i></b>\n\n<b><i><u>SEND /cancel TO STOP</u></i></b>"
+            
+        safe_send(chat_id, text, markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_2fa_code, msg_id)
+        return
+        
+    # Wallet Settings
+    if call.data.startswith("set_wallet_"):
+        wallet_type = call.data.split("_")[2]
+        btn_cn = "🔙 CANCEL"
+        if lang == "bn": btn_cn = "🔙 বাতিল করুন"
+        elif lang == "hi": btn_cn = "🔙 रद्द करें"
+        elif lang == "ur": btn_cn = "🔙 منسوخ کریں"
+            
+        markup = InlineKeyboardMarkup().add(ibtn(btn_cn, callback_data="back_to_profile", style="danger"))
+        txt = f"💳 <b>SEND YOUR {wallet_type.upper()} NUMBER/ADDRESS:</b>"
+        if lang == "bn": txt = f"💳 <b>আপনার {wallet_type.upper()} নাম্বার/ঠিকানা লিখুন:</b>"
+        elif lang == "hi": txt = f"💳 <b>अपना {wallet_type.upper()} नंबर/पता भेजें:</b>"
+        elif lang == "ur": txt = f"💳 <b>اپنا {wallet_type.upper()} نمبر/پتہ بھیجیں:</b>"
+            
+        safe_send(chat_id, txt, markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_save_wallet, wallet_type, msg_id)
+        return
+    if call.data.startswith("del_wallet_"):
+        wallet_type = call.data.split("_")[2]
+        uid_str = str(chat_id)
+        if uid_str in data.get("wallets", {}) and wallet_type in data["wallets"][uid_str]:
+            del data["wallets"][uid_str][wallet_type]
+            save_data(data)
+            bot.answer_callback_query(call.id, f"✅ {wallet_type.upper()} WALLET DELETED!", show_alert=True)
+            show_profile_withdraw(chat_id, msg_id)
+        return
+    
+    if call.data in ["main_get_number", "back_to_user_services"] or call.data.startswith("usr_s|") or call.data.startswith("usr_c|") or call.data.startswith("usr_auto_cnt|") or call.data.startswith("chg_r|"):
+        if str(chat_id) in active_polls: 
+            active_polls[str(chat_id)] = False 
+        if not check_force_join(user_id):
+            show_force_join_message(chat_id, msg_id)
+            return
+            
+    if call.data == "check_join":
+        if check_force_join(user_id):
+            alert = f"✅ WELCOME TO {data.get('watermark', BOT_NAME)}!"
+            if lang == "bn": alert = f"✅ {data.get('watermark', BOT_NAME)} এ স্বাগতম!"
+            elif lang == "hi": alert = f"✅ {data.get('watermark', BOT_NAME)} में आपका स्वागत है!"
+            elif lang == "ur": alert = f"✅ {data.get('watermark', BOT_NAME)} میں خوش آمدید!"
+                
+            bot.answer_callback_query(call.id, alert, show_alert=True)
+            try: bot.delete_message(chat_id, msg_id)
+            except: pass
+            show_main_menu(chat_id, None) 
+        else:
+            alert = "❌ PLEASE JOIN THE CHANNEL FIRST!"
+            if lang == "bn": alert = "❌ প্রথমে চ্যানেলে জয়েন করুন!"
+            elif lang == "hi": alert = "❌ कृपया पहले चैनल से जुड़ें!"
+            elif lang == "ur": alert = "❌ براہ کرم پہلے چینل میں شامل ہوں!"
+                
+            bot.answer_callback_query(call.id, alert, show_alert=True)
+        return
+        
+    if call.data == "close_menu":
+        try: bot.delete_message(chat_id, msg_id)
+        except: pass
+        return
+    
+    # --------------------------------------------
+    # ADMIN PANEL ROUTES
+    # --------------------------------------------
+    if call.data.startswith("adm_") or call.data.startswith("admin_") or call.data.startswith("add_") or call.data.startswith("del_") or call.data.startswith("editgrp_") or call.data in ["admin_broadcast", "admin_group_settings", "admin_set_watermark", "admin_force_join", "toggle_force_join", "add_fjc", "back_to_admin", "admin_manage_service", "admin_export_data", "admin_edit_withdraw", "admin_edit_leadership", "admin_edit_support", "admin_edit_texts", "admin_backup_db", "admin_search_user"]:
+        if user_id != ADMIN_ID: return safe_send(chat_id, f"⚠️ <b>ACCESS DENIED!</b>", None, msg_id)
+
+    if call.data == "back_to_admin": show_admin_panel(chat_id, msg_id)
+    
+    # --- NEW CENTRALIZED USER SEARCH ---
+    elif call.data == "admin_search_user":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🔍 <b>SEND USER ID TO MANAGE:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_admin_search_user, msg_id)
+
+    # Admin Withdraw Action Handling
+    elif call.data.startswith("adm_wd_app_"):
+        req_id = call.data.replace("adm_wd_app_", "")
+        data = load_data()
+        req = data.get("pending_withdrawals", {}).get(req_id)
+        if req:
+            target_uid = req["user_id"]
+            amt_usd = req["amount"]
+            del data["pending_withdrawals"][req_id]
+            save_data(data)
+            bot.edit_message_text(f"{call.message.text}\n\n✅ <b>APPROVED BY ADMIN</b>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML")
+            t_lang = get_user_lang(target_uid)
+            try:
+                if t_lang == "bn": ok = f"🎉 <b>আপনার {format_currency(amt_usd, t_lang)} উত্তোলনের আবেদন অনুমোদিত হয়েছে এবং পাঠানো হয়েছে!</b>"
+                elif t_lang == "hi": ok = f"🎉 <b>आपका {format_currency(amt_usd, t_lang)} निकासी अनुरोध मंज़ूर हो गया है और भेज दिया गया है!</b>"
+                elif t_lang == "ur": ok = f"🎉 <b>آپ کی {format_currency(amt_usd, t_lang)} رقم نکلوانے کی درخواست منظور کر لی گئی ہے اور بھیج دی گئی ہے!</b>"
+                else: ok = f"🎉 <b>YOUR WITHDRAWAL OF {format_currency(amt_usd, t_lang)} HAS BEEN APPROVED AND SENT!</b>"
+                bot.send_message(target_uid, ok, parse_mode="HTML")
+            except: pass
+        else:
+            bot.answer_callback_query(call.id, "❌ REQUEST NOT FOUND OR ALREADY PROCESSED.", show_alert=True)
+            
+    elif call.data.startswith("adm_wd_rej_"):
+        req_id = call.data.replace("adm_wd_rej_", "")
+        data = load_data()
+        req = data.get("pending_withdrawals", {}).get(req_id)
+        if req:
+            target_uid = req["user_id"]
+            amt_usd = req["amount"]
+            current = data.get("balances", {}).get(target_uid, 0.0)
+            data["balances"][target_uid] = round(current + amt_usd, 5)
+            del data["pending_withdrawals"][req_id]
+            save_data(data)
+            
+            bot.edit_message_text(f"{call.message.text}\n\n❌ <b>REJECTED & REFUNDED</b>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML")
+            t_lang = get_user_lang(target_uid)
+            try:
+                if t_lang == "bn": ok = f"⚠️ <b>আপনার {format_currency(amt_usd, t_lang)} উত্তোলনের আবেদন বাতিল করা হয়েছে।</b>\nব্যালেন্স আপনার অ্যাকাউন্টে ফেরত দেওয়া হয়েছে।"
+                elif t_lang == "hi": ok = f"⚠️ <b>आपका {format_currency(amt_usd, t_lang)} निकासी अनुरोध रद्द कर दिया गया है।</b>\nफ़ंड आपके बैलेंस में वापस कर दिया गया है।"
+                elif t_lang == "ur": ok = f"⚠️ <b>آپ کی {format_currency(amt_usd, t_lang)} کی درخواست مسترد کر دی گئی ہے۔</b>\nفنڈز آپ کے بیلنس میں واپس کر دیے گئے ہیں۔"
+                else: ok = f"⚠️ <b>YOUR WITHDRAWAL OF {format_currency(amt_usd, t_lang)} WAS REJECTED.</b>\nFunds have been refunded to your balance."
+                bot.send_message(target_uid, ok, parse_mode="HTML")
+            except: pass
+        else:
+            bot.answer_callback_query(call.id, "❌ REQUEST NOT FOUND OR ALREADY PROCESSED.", show_alert=True)
+
+    # 10 NEW FEATURES ROUTES
+    elif call.data == "admin_user_list":
+        admin_user_list_feature(chat_id)
+    elif call.data == "admin_direct_ban":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, "🚫 <b>SEND USER ID TO BAN:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_direct_ban, msg_id)
+    elif call.data == "admin_direct_unban":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, "✅ <b>SEND USER ID TO UNBAN:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_direct_unban, msg_id)
+    elif call.data == "admin_clear_banned":
+        data["banned_users"] = []
+        save_data(data)
+        bot.answer_callback_query(call.id, "✅ BANNED LIST CLEARED!", show_alert=True)
+        show_admin_panel(chat_id, msg_id)
+    elif call.data == "admin_server_stats":
+        show_server_stats(chat_id, msg_id)
+    elif call.data == "admin_msg_user":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, "✉️ <b>SEND TARGET USER ID TO MESSAGE:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_msg_user_id, msg_id)
+    elif call.data == "admin_edit_otp_bonus":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"💰 <b>ENTER NEW OTP BONUS in USD (Current: ${data.get('settings', {}).get('otp_bonus', OTP_BONUS)}):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_otp_bonus, msg_id)
+    elif call.data == "admin_edit_ref_bonus":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🎁 <b>ENTER NEW REF BONUS in USD (Current: ${data.get('settings', {}).get('ref_bonus', REF_BONUS)}):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_ref_bonus, msg_id)
+    elif call.data == "admin_edit_max_nums":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"📱 <b>ENTER MAX NUMBERS TO PULL AT ONCE (Current: {data.get('settings', {}).get('max_numbers', MAX_NUMBERS)}):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_max_nums, msg_id)
+    elif call.data == "admin_alerts_toggle":
+        curr = data.setdefault("settings", {}).get("admin_alerts", False)
+        data["settings"]["admin_alerts"] = not curr
+        save_data(data)
+        show_admin_panel(chat_id, msg_id)
+
+    # Handle Ban/Unban directly from profile
+    elif call.data.startswith("adm_ban_"):
+        target_uid = int(call.data.split("_")[2])
+        if target_uid not in data.setdefault("banned_users", []):
+            data["banned_users"].append(target_uid)
+            save_data(data)
+            bot.answer_callback_query(call.id, f"✅ User {target_uid} Banned!", show_alert=True)
+        show_user_admin_profile(chat_id, target_uid, msg_id)
+        
+    elif call.data.startswith("adm_unban_"):
+        target_uid = int(call.data.split("_")[2])
+        if target_uid in data.setdefault("banned_users", []):
+            data["banned_users"].remove(target_uid)
+            save_data(data)
+            bot.answer_callback_query(call.id, f"✅ User {target_uid} Unbanned!", show_alert=True)
+        show_user_admin_profile(chat_id, target_uid, msg_id)
+
+    elif call.data.startswith("adm_edit_bal_"):
+        target_uid = call.data.split("_")[3]
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data=f"adm_prof_{target_uid}", style="danger"))
+        safe_send(chat_id, f"💰 <b>ENTER AMOUNT TO ADD/DEDUCT IN USD FOR {target_uid}:</b>\n<i>(Use negative like -5 to deduct)</i>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_inline_balance_edit, target_uid, msg_id)
+        
+    elif call.data.startswith("adm_prof_"):
+        target_uid = call.data.split("_")[2]
+        show_user_admin_profile(chat_id, target_uid, msg_id)
+
+    elif call.data == "admin_backup_db":
+        try:
+            with open(DATA_FILE, "rb") as f:
+                bot.send_document(chat_id, f, caption="💾 <b>HERE IS YOUR DATABASE BACKUP!</b>\nKeep it safe.", parse_mode="HTML")
+        except:
+            bot.answer_callback_query(call.id, "Error generating backup!", show_alert=True)
+        return
+        
+    elif call.data == "admin_maintenance":
+        data["maintenance"] = not data.get("maintenance", False)
+        save_data(data)
+        show_admin_panel(chat_id, msg_id)
+    elif call.data == "admin_api_key":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🔑 <b>SEND NEW API KEY:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_admin_api_key, msg_id)
+    elif call.data == "admin_reward_all":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🎁 <b>ENTER BALANCE AMOUNT TO REWARD ALL (IN USD):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_admin_reward_all, msg_id)
+    elif call.data == "admin_deduct_all":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"➖ <b>ENTER BALANCE AMOUNT TO DEDUCT (IN USD):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_admin_deduct_all, msg_id)
+    elif call.data == "admin_reset_otp":
+        data["otp_counts"] = {}
+        save_data(data)
+        bot.answer_callback_query(call.id, "✅ ALL OTP RECORDS RESET SUCCESSFULLY!", show_alert=True)
+        show_admin_panel(chat_id, msg_id)
+    elif call.data == "admin_edit_texts":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"📝 <b>SEND NEW WELCOME TEXT (OR TYPE /skip):</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_welcome, msg_id)
+    elif call.data == "admin_export_data":
+        generate_and_send_wallet_file(chat_id)
+    elif call.data == "admin_edit_leadership":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🏆 <b>SEND NEW LEADERBOARD TEXT:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_leadership, msg_id)
+    elif call.data == "admin_edit_support":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"🎧 <b>SEND NEW SUPPORT TEXT:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_edit_support, msg_id)
+        
+    elif call.data == "back_to_user_services": show_user_services(chat_id, msg_id)
+
+    elif call.data.startswith("usr_s|"):
+        srv_id = call.data.split("|")[1]
+        show_user_countries(chat_id, srv_id, msg_id)
+
+    # --- SMART EXTRACT NUMBER LOGIC ---
+    elif call.data.startswith("usr_c|") or call.data.startswith("chg_r|") or call.data.startswith("usr_auto_cnt|"):
+        if not check_force_join(user_id):
+            show_force_join_message(chat_id, msg_id)
+            return
+
+        if str(chat_id) in active_polls: 
+            active_polls[str(chat_id)] = False 
+
+        parts = call.data.split("|")
+        action = parts[0]
+        srv_id = parts[1]
+
+        srv_data = data.get("services_data", {}).get(srv_id)
+        if not srv_data or not srv_data.get("countries"):
+            err = "❌ <b>NO COUNTRIES/RANGES AVAILABLE.</b>"
+            if lang == "bn": err = "❌ <b>কোনো দেশ/রেঞ্জ উপলব্ধ নেই।</b>"
+            elif lang == "hi": err = "❌ <b>कोई देश/रेंज उपलब्ध नहीं है।</b>"
+            elif lang == "ur": err = "❌ <b>کوئی ملک/رینج دستیاب نہیں ہے۔</b>"
+            return safe_send(chat_id, err, None, msg_id)
+
+        all_ranges = []
+        country_name = "Unknown"
+        
+        if action == "usr_auto_cnt":
+            for c_id, c_data in srv_data["countries"].items():
+                for r_id, r_val in c_data.get("ranges", {}).items():
+                    # Clean names directly when picking from arrays
+                    safe_name = clean_country_name(c_data['name'])
+                    all_ranges.append((c_id, safe_name, r_id, r_val))
+            country_name = "AUTO SELECT"
+        else:
+            cnt_id = parts[2]
+            cnt_data = srv_data.get("countries", {}).get(cnt_id)
+            if cnt_data:
+                country_name = clean_country_name(cnt_data['name'])
+                for r_id, r_val in cnt_data.get("ranges", {}).items():
+                    all_ranges.append((cnt_id, country_name, r_id, r_val))
+
+        if not all_ranges:
+            err = "❌ <b>NO RANGES AVAILABLE FOR THIS SELECTION.</b>"
+            if lang == "bn": err = "❌ <b>এই নির্বাচনের জন্য কোনো রেঞ্জ উপলব্ধ নেই।</b>"
+            elif lang == "hi": err = "❌ <b>इस चयन के लिए कोई रेंज उपलब्ध नहीं है।</b>"
+            elif lang == "ur": err = "❌ <b>اس انتخاب کے لیے کوئی رینج دستیاب نہیں ہے۔</b>"
+            return safe_send(chat_id, err, None, msg_id)
+
+        msg_t = "⏳ <b>SEARCHING FOR LIVE NUMBERS...</b>\n<i>Checking available ranges...</i>"
+        if lang == "bn": msg_t = "⏳ <b>লাইভ নাম্বার খোঁজা হচ্ছে...</b>\n<i>উপলব্ধ রেঞ্জ চেক করা হচ্ছে...</i>"
+        elif lang == "hi": msg_t = "⏳ <b>लाइव नंबर ढूंढे जा रहे हैं...</b>\n<i>उपलब्ध रेंज चेक की जा रही हैं...</i>"
+        elif lang == "ur": msg_t = "⏳ <b>لائیو نمبر تلاش کیے جا رہے ہیں...</b>\n<i>دستیاب رینج چیک کی جا رہی ہیں...</i>"
+            
+        msg_obj = safe_send(chat_id, msg_t, None, msg_id)
+        if msg_obj:
+            threading.Thread(target=fetch_numbers_smart, args=(chat_id, srv_id, srv_data['name'], all_ranges, api_key, msg_obj.message_id)).start()
+
+    # Admin Services Management
+    elif call.data == "admin_manage_service": show_admin_services(chat_id, msg_id)
+    elif call.data == "add_srv":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="admin_manage_service", style="danger"))
+        safe_send(chat_id, f"📨 <b>SEND SERVICE NAME:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_add_srv, msg_id)
+    elif call.data.startswith("adm_s|"): show_admin_countries(chat_id, call.data.split("|")[1], msg_id)
+    elif call.data.startswith("add_cnt|"):
+        srv_id = call.data.split("|")[1]
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data=f"adm_s|{srv_id}", style="danger"))
+        safe_send(chat_id, f"🌍 <b>SEND COUNTRY NAME:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_add_cnt, srv_id, msg_id)
+    elif call.data.startswith("adm_c|"):
+        _, srv_id, cnt_id = call.data.split("|")
+        show_admin_ranges(chat_id, srv_id, cnt_id, msg_id)
+    elif call.data.startswith("add_rng|"):
+        _, srv_id, cnt_id = call.data.split("|")
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data=f"adm_c|{srv_id}|{cnt_id}", style="danger"))
+        safe_send(chat_id, f"📱 <b>SEND RANGE:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_add_rng, srv_id, cnt_id, msg_id)
+    elif call.data.startswith("del_srv|"):
+        srv_id = call.data.split("|")[1]
+        if srv_id in data.get("services_data", {}): del data["services_data"][srv_id]; save_data(data)
+        show_admin_services(chat_id, msg_id)
+    elif call.data.startswith("del_cnt|"):
+        _, srv_id, cnt_id = call.data.split("|")
+        if srv_id in data["services_data"] and cnt_id in data["services_data"][srv_id]["countries"]: del data["services_data"][srv_id]["countries"][cnt_id]; save_data(data)
+        show_admin_countries(chat_id, srv_id, msg_id)
+    elif call.data.startswith("del_rng|"):
+        _, srv_id, cnt_id, rng_id = call.data.split("|")
+        if srv_id in data["services_data"] and cnt_id in data["services_data"][srv_id]["countries"] and rng_id in data["services_data"][srv_id]["countries"][cnt_id]["ranges"]: del data["services_data"][srv_id]["countries"][cnt_id]["ranges"][rng_id]; save_data(data)
+        show_admin_ranges(chat_id, srv_id, cnt_id, msg_id)
+    
+    elif call.data == "admin_group_settings": safe_send(chat_id, f"🔗 <b>GROUP SETTINGS</b>\n{DIVIDER}\n<b>MANAGE OTP GROUPS</b>", get_group_settings_menu(), msg_id)
+    elif call.data == "set_main_otp_link":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="admin_group_settings", style="danger"))
+        safe_send(chat_id, f"🔗 <b>SEND OTP GROUP URL:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_main_otp_link, msg_id)
+    elif call.data == "del_main_otp_link":
+        data["main_otp_link"] = "https://t.me/"; save_data(data)
+        safe_send(chat_id, f"🗑️ <b>OTP LINK REMOVED!</b>", None, msg_id)
+        show_edit_group_menu(chat_id, "🔗 <b>GROUP SETTINGS</b>", msg_id)
+    elif call.data == "add_fwd_group":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="admin_group_settings", style="danger"))
+        safe_send(chat_id, f"➕ <b>SEND GROUP CHAT ID:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, step1_add_fwd_group, msg_id)
+    elif call.data.startswith("editgrp_"): show_edit_group_menu(chat_id, call.data.split("_")[1], msg_id)
+    elif call.data.startswith("addgrpbtn_"):
+        grp_id = call.data.split("_")[1]
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data=f"editgrp_{grp_id}", style="danger"))
+        safe_send(chat_id, f"📝 <b>SEND BUTTON NAME:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, step_addgrpbtn_name, grp_id, msg_id)
+    elif call.data.startswith("delgrpbtn_"):
+        parts = call.data.split("_"); grp_id, btn_idx = parts[1], int(parts[2])
+        for g in data.get("forward_groups", []):
+            if str(g['chat_id']) == str(grp_id):
+                if 0 <= btn_idx < len(g.get("buttons", [])): g["buttons"].pop(btn_idx)
+                break
+        save_data(data); show_edit_group_menu(chat_id, grp_id, msg_id)
+    elif call.data.startswith("delfwd_"):
+        grp_id = call.data.split("_")[1]
+        data["forward_groups"] = [g for g in data.get("forward_groups", []) if str(g['chat_id']) != grp_id]
+        save_data(data)
+        safe_send(chat_id, f"🗑️ <b>GROUP DELETED!</b>", None, msg_id)
+        safe_send(chat_id, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), msg_id)
+    
+    elif call.data == "admin_force_join": safe_send(chat_id, f"📢 <b>FORCE JOIN</b>\n{DIVIDER}", get_force_join_menu(), msg_id)
+    elif call.data == "toggle_force_join":
+        data["force_join_enabled"] = not data.get("force_join_enabled", False); save_data(data)
+        safe_send(chat_id, f"📢 <b>FORCE JOIN</b>\n{DIVIDER}", get_force_join_menu(), msg_id)
+    elif call.data == "add_fjc":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="admin_force_join", style="danger"))
+        safe_send(chat_id, f"🔗 <b>SEND CHANNEL LINK:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_set_force_join_link, msg_id)
+    elif call.data.startswith("delfjc_"):
+        idx = int(call.data.split("_")[1])
+        if 0 <= idx < len(data.get("force_join_channels", [])): data["force_join_channels"].pop(idx); save_data(data)
+        safe_send(chat_id, f"📢 <b>FORCE JOIN</b>\n{DIVIDER}", get_force_join_menu(), msg_id)
+    
+    elif call.data == "admin_set_watermark":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"📝 <b>SEND NEW WATERMARK:</b>\nCURRENT: {data.get('watermark', BOT_NAME)}", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_set_watermark, msg_id)
+    elif call.data == "admin_broadcast":
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, f"📨 <b>SEND MESSAGE TO BROADCAST:</b>", markup, msg_id)
+        bot.register_next_step_handler_by_chat_id(chat_id, process_broadcast, msg_id)
+
+def process_save_wallet(message, wallet_type, msg_id):
+    if check_cancel(message, msg_id, show_profile_withdraw): return
+    
+    data = load_data()
+    uid_str = str(message.chat.id)
+    data.setdefault("wallets", {}).setdefault(uid_str, {})[wallet_type] = message.text.strip()
+    save_data(data)
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    
+    lang = get_user_lang(message.chat.id)
+    ok_msg = f"✅ <b>{wallet_type.upper()} WALLET SAVED SUCCESSFULLY!</b>"
+    if lang == "bn": ok_msg = f"✅ <b>{wallet_type.upper()} ওয়ালেট সফলভাবে সেভ হয়েছে!</b>"
+    elif lang == "hi": ok_msg = f"✅ <b>{wallet_type.upper()} वॉलेट सफलतापूर्वक सेव हो गया!</b>"
+    elif lang == "ur": ok_msg = f"✅ <b>{wallet_type.upper()} والیٹ کامیابی سے محفوظ ہو گیا!</b>"
+        
+    bot.send_message(message.chat.id, ok_msg, parse_mode="HTML")
+    show_profile_withdraw(message.chat.id, None)
+
+# --- Admin Save Wallet Functions ---
+def generate_and_send_wallet_file(chat_id):
+    data = load_data()
+    wallets = data.get("wallets", {})
+    balances = data.get("balances", {})
+    profiles = data.get("user_profiles", {})
+    otps_data = data.get("otp_counts", {})
+    
+    content = "👑 MINO X SMS - ALL DATA EXPORT 👑\n"
+    content += "="*50 + "\n\n"
+    
+    if not wallets and not balances:
+        content += "No user data found."
+    else:
+        for uid in data.get("users", []):
+            uid_str = str(uid)
+            bal_usd = balances.get(uid_str, 0.0)
+            u_wallets = wallets.get(uid_str, {})
+            otp_cnt = otps_data.get(uid_str, 0)
+            
+            profile = profiles.get(uid_str, {})
+            name = profile.get("first_name", "Unknown")
+            username = profile.get("username", "N/A")
+            
+            content += f"👤 USER ID: {uid_str}\n"
+            content += f"📛 NAME: {name} (@{username})\n"
+            content += f"💰 BALANCE: ${bal_usd:.5f}\n"
+            content += f"🎯 TOTAL OTPS: {otp_cnt}\n"
+            content += "🏦 WALLETS:\n"
+            
+            if u_wallets:
+                for w_type, addr in u_wallets.items():
+                    content += f"   - {w_type.upper()}: {addr}\n"
+            else:
+                content += "   - NO WALLETS SET\n"
+            content += "-"*40 + "\n"
+            
+    file_bytes = io.BytesIO(content.encode('utf-8'))
+    file_bytes.name = "database_export.txt"
+    bot.send_document(chat_id, file_bytes, caption="📁 <b>HERE IS THE COMPLETE USER DATA REPORT</b>", parse_mode="HTML")
+
+# --- Centralized Admin User Management System ---
+def process_admin_search_user(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    target_uid = message.text.strip()
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    show_user_admin_profile(message.chat.id, target_uid, None)
+
+def show_user_admin_profile(chat_id, target_uid, msg_id):
+    data = load_data()
+    target_uid = str(target_uid)
+    
+    if target_uid not in [str(u) for u in data.get("users", [])]:
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 BACK", callback_data="back_to_admin", style="danger"))
+        safe_send(chat_id, "❌ <b>USER NOT FOUND IN DATABASE.</b>", markup, msg_id)
+        return
+
+    bal_usd = data["balances"].get(target_uid, 0.0)
+    otp_count = data["otp_counts"].get(target_uid, 0)
+    is_banned = int(target_uid) in data.get("banned_users", [])
+    banned_str = "🔴 YES (BANNED)" if is_banned else "🟢 NO (ACTIVE)"
+    
+    profile = data.get("user_profiles", {}).get(target_uid, {})
+    name = profile.get("first_name", "Unknown")
+    username = profile.get("username", "N/A")
+    lang_pref = profile.get("lang", "en")
+    
+    wallets = data.get("wallets", {}).get(target_uid, {})
+    w_text = "\n".join([f"   - {k.upper()}: <code>{v}</code>" for k, v in wallets.items()]) if wallets else "   - <i>NONE ADDED</i>"
+    
+    text = f"🔍 <b>USER MANAGEMENT PROFILE</b> 🔍\n{DIVIDER}\n👤 <b>ID:</b> <code>{target_uid}</code>\n📛 <b>NAME:</b> {html.escape(name)}\n🔗 <b>USERNAME:</b> @{username}\n🌐 <b>LANGUAGE:</b> {lang_pref.upper()}\n\n💰 <b>BALANCE (USD):</b> <b>${bal_usd:.5f}</b>\n🎯 <b>TOTAL OTPS:</b> <b>{otp_count}</b>\n🛡️ <b>STATUS:</b> <b>{banned_str}</b>\n\n🏦 <b>SAVED WALLETS:</b>\n{w_text}\n{DIVIDER}"
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(ibtn("💰 EDIT BALANCE", callback_data=f"adm_edit_bal_{target_uid}", style="success"))
+    if is_banned:
+        markup.add(ibtn("✅ UNBAN USER", callback_data=f"adm_unban_{target_uid}", style="success"))
+    else:
+        markup.add(ibtn("🚫 BAN USER", callback_data=f"adm_ban_{target_uid}", style="danger"))
+    
+    markup.add(ibtn("🔙 BACK TO ADMIN", callback_data="back_to_admin", style="primary"))
+    
+    safe_send(chat_id, text, markup, msg_id)
+
+def process_inline_balance_edit(message, target_uid, msg_id):
+    if check_cancel(message, msg_id, show_user_admin_profile, target_uid): return
+    try:
+        amt_usd = float(message.text.strip())
+        data = load_data()
+        current = data["balances"].get(target_uid, 0.0)
+        data["balances"][target_uid] = round(current + amt_usd, 5)
+        save_data(data)
+        
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        bot.send_message(message.chat.id, f"✅ <b>SUCCESS! Updated balance by ${amt_usd:.5f}</b>", parse_mode="HTML")
+        show_user_admin_profile(message.chat.id, target_uid, None)
+        
+    except ValueError:
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        bot.send_message(message.chat.id, "❌ <b>INVALID AMOUNT. CANCELLED.</b>", parse_mode="HTML")
+        show_user_admin_profile(message.chat.id, target_uid, None)
+
+# -----------------------------------------------------
+# 10 NEW ADMIN PROCESS HANDLERS
+# -----------------------------------------------------
+def admin_user_list_feature(chat_id):
+    data = load_data()
+    content = "👥 MINO X SMS - COMPLETE USER LIST 👥\n"
+    content += "="*50 + "\n\n"
+    users_count = len(data.get("users", []))
+    
+    for uid in data.get("users", []):
+        uid_str = str(uid)
+        profile = data.get("user_profiles", {}).get(uid_str, {})
+        username = profile.get("username", "N/A")
+        name = profile.get("first_name", "Unknown")
+        content += f"ID: {uid_str} | Username: @{username} | Name: {name}\n"
+        
+    file_bytes = io.BytesIO(content.encode('utf-8'))
+    file_bytes.name = "user_list.txt"
+    markup = InlineKeyboardMarkup().add(ibtn("🔙 BACK TO ADMIN", callback_data="back_to_admin", style="primary"))
+    bot.send_document(chat_id, file_bytes, caption=f"👥 <b>COMPLETE USER LIST EXPORTED</b>\nTotal Users: <b>{users_count}</b>", parse_mode="HTML", reply_markup=markup)
+
+def process_direct_ban(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try:
+        target_uid = int(message.text.strip())
+        data = load_data()
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        if target_uid not in data.setdefault("banned_users", []):
+            data["banned_users"].append(target_uid)
+            save_data(data)
+            bot.send_message(message.chat.id, f"✅ <b>USER {target_uid} HAS BEEN BANNED!</b>", parse_mode="HTML")
+        else:
+            bot.send_message(message.chat.id, f"⚠️ <b>USER {target_uid} IS ALREADY BANNED.</b>", parse_mode="HTML")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ <b>INVALID ID FORMAT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_direct_unban(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try:
+        target_uid = int(message.text.strip())
+        data = load_data()
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        if target_uid in data.setdefault("banned_users", []):
+            data["banned_users"].remove(target_uid)
+            save_data(data)
+            bot.send_message(message.chat.id, f"✅ <b>USER {target_uid} HAS BEEN UNBANNED!</b>", parse_mode="HTML")
+        else:
+            bot.send_message(message.chat.id, f"⚠️ <b>USER {target_uid} IS NOT BANNED.</b>", parse_mode="HTML")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ <b>INVALID ID FORMAT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def show_server_stats(chat_id, msg_id):
+    uptime = int(time.time() - START_TIME)
+    m, s = divmod(uptime, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    data = load_data()
+    
+    text = f"📈 <b>SERVER & BOT STATS</b> 📈\n{DIVIDER}\n"
+    text += f"⏱️ <b>Uptime:</b> {d}d {h}h {m}m {s}s\n"
+    text += f"👥 <b>Total Users:</b> {len(data.get('users', []))}\n"
+    text += f"🎯 <b>Total OTPs Processed:</b> {len(data.get('processed_otps', []))}\n"
+    text += f"💻 <b>Python Version:</b> {sys.version.split(' ')[0]}\n"
+    text += f"{DIVIDER}"
+    
+    markup = InlineKeyboardMarkup().add(ibtn("🔙 BACK", callback_data="back_to_admin", style="primary"))
+    safe_send(chat_id, text, markup, msg_id)
+
+def process_msg_user_id(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try:
+        target_uid = int(message.text.strip())
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+        safe_send(message.chat.id, f"✉️ <b>SEND THE MESSAGE FOR USER {target_uid}:</b>", markup, None)
+        bot.register_next_step_handler_by_chat_id(message.chat.id, process_msg_user_text, target_uid, None)
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ <b>INVALID ID FORMAT.</b>", parse_mode="HTML")
+        show_admin_panel(message.chat.id, None)
+
+def process_msg_user_text(message, target_uid, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    msg_text = f"📩 <b>MESSAGE FROM ADMIN:</b>\n{DIVIDER}\n{message.text}"
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    try:
+        bot.send_message(target_uid, msg_text, parse_mode="HTML")
+        bot.send_message(message.chat.id, f"✅ <b>MESSAGE SENT SUCCESSFULLY TO {target_uid}!</b>", parse_mode="HTML")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ <b>FAILED TO SEND MESSAGE (User might have blocked bot).</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_edit_otp_bonus(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try:
+        new_val = float(message.text.strip())
+        data = load_data()
+        data.setdefault("settings", {})["otp_bonus"] = new_val
+        save_data(data)
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        bot.send_message(message.chat.id, f"✅ <b>OTP BONUS UPDATED TO ${new_val}</b>", parse_mode="HTML")
+    except:
+        bot.send_message(message.chat.id, "❌ <b>INVALID AMOUNT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_edit_ref_bonus(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try:
+        new_val = float(message.text.strip())
+        data = load_data()
+        data.setdefault("settings", {})["ref_bonus"] = new_val
+        save_data(data)
+        try: bot.delete_message(message.chat.id, msg_id)
+        except: pass
+        bot.send_message(message.chat.id, f"✅ <b>REFERRAL BONUS UPDATED TO ${new_val}</b>", parse_mode="HTML")
+    except:
+        bot.send_message(message.chat.id, "❌ <b>INVALID AMOUNT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_edit_max_nums(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    try:
+        new_val = int(message.text.strip())
+        if new_val < 1 or new_val > 10:
+            bot.send_message(message.chat.id, "❌ <b>PLEASE KEEP VALUE BETWEEN 1 and 10.</b>", parse_mode="HTML")
+        else:
+            data = load_data()
+            data.setdefault("settings", {})["max_numbers"] = new_val
+            save_data(data)
+            bot.send_message(message.chat.id, f"✅ <b>MAX NUMBERS UPDATED TO {new_val}</b>", parse_mode="HTML")
+    except:
+        bot.send_message(message.chat.id, "❌ <b>INVALID NUMBER.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+# --- Other Admin Process Handlers ---
+def process_admin_api_key(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    data["api_key"] = message.text.strip(); save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>API KEY UPDATED!</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_admin_reward_all(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    try:
+        amt = float(message.text.strip())
+        data = load_data()
+        for u in data.get("users", []):
+            current = data["balances"].get(str(u), 0.0)
+            data["balances"][str(u)] = round(current + amt, 5)
+        save_data(data)
+        bot.send_message(message.chat.id, f"✅ <b>ADDED ${amt:.5f} TO ALL USERS!</b>", parse_mode="HTML")
+    except ValueError: 
+        bot.send_message(message.chat.id, "❌ <b>INVALID AMOUNT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_admin_deduct_all(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    try:
+        amt = float(message.text.strip())
+        data = load_data()
+        for u in data.get("users", []):
+            current = data["balances"].get(str(u), 0.0)
+            data["balances"][str(u)] = max(0.0, round(current - amt, 5))
+        save_data(data)
+        bot.send_message(message.chat.id, f"✅ <b>DEDUCTED ${amt:.5f} FROM ALL USERS!</b>", parse_mode="HTML")
+    except ValueError: 
+        bot.send_message(message.chat.id, "❌ <b>INVALID AMOUNT.</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_edit_welcome(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    if message.text.strip() != "/skip":
+        data["settings"]["welcome"] = message.text.strip()
+        save_data(data)
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    
+    markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data="back_to_admin", style="danger"))
+    safe_send(message.chat.id, f"🏦 <b>SEND NEW WITHDRAW INFO TEXT:</b>", markup, None)
+    bot.register_next_step_handler_by_chat_id(message.chat.id, process_edit_withdraw, None)
+
+def process_edit_withdraw(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    data["settings"]["withdraw"] = message.text; save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, "✅ <b>TEXTS UPDATED SUCCESSFULLY!</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+    
+def process_edit_leadership(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    data["settings"]["leadership"] = message.text; save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, "✅ <b>LEADERBOARD INFO UPDATED!</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+    
+def process_edit_support(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    data["settings"]["support"] = message.text; save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, "✅ <b>SUPPORT INFO UPDATED!</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def process_2fa_code(message, msg_id):
+    if check_cancel(message, msg_id, show_2fa_menu): return
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+        
+    secret_key = message.text.strip().upper().replace(" ", "")
+    lang = get_user_lang(message.chat.id)
+    
+    if len(secret_key) < 8:
+        err = "❌ <b>INVALID KEY! KEY TOO SHORT.</b>"
+        if lang == "bn": err = "❌ <b>ভুল কী! কী খুব ছোট।</b>"
+        elif lang == "hi": err = "❌ <b>अमान्य की! की बहुत छोटी है।</b>"
+        elif lang == "ur": err = "❌ <b>غلط کی! کی بہت چھوٹی ہے۔</b>"
+            
+        bot.send_message(message.chat.id, err, parse_mode="HTML")
+        show_2fa_menu(message.chat.id, None); return
+    try:
+        totp = pyotp.TOTP(secret_key)
+        code = totp.now()
+        remaining = 30 - (int(time.time()) % 30)
+        
+        if lang == "bn":
+            text = f"🔴 <b><i><u>আপনার নিরাপদ 2FA কোড</u></i></b> 🔴\n\n<b><i><u>কোড:</u></i></b> <code>{code}</code>\n\n<b><i><u>মেয়াদ:</u></i></b> <b><i><u>{remaining} সেকেন্ড</u></i></b>"
+            btn_copy = f"📋 কপি: {code}"
+            btn_new = "🔄 নতুন কোড"
+            btn_cls = "❌ বন্ধ করুন"
+        elif lang == "hi":
+            text = f"🔴 <b><i><u>आपका सुरक्षित 2FA कोड</u></i></b> 🔴\n\n<b><i><u>कोड:</u></i></b> <code>{code}</code>\n\n<b><i><u>समाप्त होगा:</u></i></b> <b><i><u>{remaining} सेकंड में</u></i></b>"
+            btn_copy = f"📋 कॉपी: {code}"
+            btn_new = "🔄 नया कोड"
+            btn_cls = "❌ बंद करें"
+        elif lang == "ur":
+            text = f"🔴 <b><i><u>آپ کا محفوظ 2FA کوڈ</u></i></b> 🔴\n\n<b><i><u>کوڈ:</u></i></b> <code>{code}</code>\n\n<b><i><u>ختم ہوگا:</u></i></b> <b><i><u>{remaining} سیکنڈز میں</u></i></b>"
+            btn_copy = f"📋 کاپی: {code}"
+            btn_new = "🔄 نیا کوڈ"
+            btn_cls = "❌ بند کریں"
+        else:
+            text = f"🔴 <b><i><u>YOUR SECURE 2FA CODE</u></i></b> 🔴\n\n<b><i><u>CODE:</u></i></b> <code>{code}</code>\n\n<b><i><u>EXPIRES IN:</u></i></b> <b><i><u>{remaining}S</u></i></b>"
+            btn_copy = f"📋 COPY: {code}"
+            btn_new = "🔄 NEW CODE"
+            btn_cls = "❌ CLOSE"
+            
+        markup = InlineKeyboardMarkup(row_width=1)
+        if HAS_COPY_BTN: markup.add(ibtn(btn_copy, copy_text_str=code, style="success"))
+        else: markup.add(ibtn(btn_copy, callback_data=f"cp_{code}", style="success"))
+        markup.add(ibtn(btn_new, callback_data="2fa_generate", style="primary"))
+        markup.add(ibtn(btn_cls, callback_data="2fa_back", style="danger"))
+        safe_send(message.chat.id, text, markup, None)
+    except:
+        err = "❌ <b>INVALID 2FA KEY!</b>"
+        if lang == "bn": err = "❌ <b>ভুল 2FA কী!</b>"
+        elif lang == "hi": err = "❌ <b>अमान्य 2FA की!</b>"
+        elif lang == "ur": err = "❌ <b>غلط 2FA کی!</b>"
+            
+        bot.send_message(message.chat.id, err, parse_mode="HTML")
+        show_2fa_menu(message.chat.id, None)
+
+# --- Process APIs ---
+def process_set_force_join_link(message, msg_id):
+    if check_cancel(message, msg_id, lambda cid, mid: safe_send(cid, f"📢 <b>FORCE JOIN</b>\n{DIVIDER}", get_force_join_menu(), mid)): return
+    data = load_data()
+    data.setdefault("force_join_channels", []).append(format_url(message.text.strip())); save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>CHANNEL ADDED!</b>", parse_mode="HTML")
+    safe_send(message.chat.id, f"📢 <b>FORCE JOIN</b>\n{DIVIDER}", get_force_join_menu(), None)
+
+def process_add_srv(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_services): return
+    data = load_data()
+    srv_id = "s_" + str(uuid.uuid4())[:8]
+    data.setdefault("services_data", {})[srv_id] = {"name": message.text.strip().upper(), "countries": {}}; save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    show_admin_services(message.chat.id, None)
+
+def process_add_cnt(message, srv_id, msg_id):
+    if check_cancel(message, msg_id, show_admin_countries, srv_id): return
+    data = load_data()
+    cnt_id = "c_" + str(uuid.uuid4())[:8]
+    if srv_id in data.get("services_data", {}): 
+        # Clean incoming name so admin mistakes won't cause bugs later
+        safe_name = clean_country_name(message.text.upper())
+        data["services_data"][srv_id]["countries"][cnt_id] = {"name": safe_name, "ranges": {}}; 
+        save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    show_admin_countries(message.chat.id, srv_id, None)
+
+def process_add_rng(message, srv_id, cnt_id, msg_id):
+    if check_cancel(message, msg_id, show_admin_ranges, srv_id, cnt_id): return
+    data = load_data()
+    rng_id = "r_" + str(uuid.uuid4())[:8]
+    try: data["services_data"][srv_id]["countries"][cnt_id]["ranges"][rng_id] = message.text.strip().replace(" ", ""); save_data(data)
+    except: pass
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    show_admin_ranges(message.chat.id, srv_id, cnt_id, None)
+
+def process_api_traffic_search(message, msg_id):
+    if check_cancel(message, msg_id, lambda c, m: None): return
+        
+    user_id = message.from_user.id
+    current_time = time.time()
+    api_key = load_data().get("api_key", NEXA_API_KEY)
+    lang = get_user_lang(user_id)
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+
+    btn_cls = "❌ CLOSE"
+    if lang == "bn": btn_cls = "❌ বন্ধ করুন"
+    elif lang == "hi": btn_cls = "❌ बंद करें"
+    elif lang == "ur": btn_cls = "❌ بند کریں"
+    
+    if user_id in traffic_cooldowns:
+        time_passed = current_time - traffic_cooldowns[user_id]
+        if time_passed < 10:
+            wait_time = int(10 - time_passed)
+            markup = InlineKeyboardMarkup().add(ibtn(btn_cls, callback_data="close_menu", style="danger"))
+            wait_msg = f"⏰ <b>WAIT {wait_time}S.</b>"
+            if lang == "bn": wait_msg = f"⏰ <b>{wait_time} সেকেন্ড অপেক্ষা করুন।</b>"
+            elif lang == "hi": wait_msg = f"⏰ <b>{wait_time} सेकंड प्रतीक्षा करें।</b>"
+            elif lang == "ur": wait_msg = f"⏰ <b>{wait_time} سیکنڈ انتظار کریں۔</b>"
+                
+            safe_send(message.chat.id, wait_msg, markup, None); return
+            
+    traffic_cooldowns[user_id] = current_time
+    service_query = message.text.strip().lower()
+    
+    load_text = "⏳ <b>CHECKING TRAFFIC...</b>"
+    if lang == "bn": load_text = "⏳ <b>ট্রাফিক চেক করা হচ্ছে...</b>"
+    elif lang == "hi": load_text = "⏳ <b>ट्रैफ़िक चेक किया जा रहा है...</b>"
+    elif lang == "ur": load_text = "⏳ <b>ٹریفک چیک کی جا رہی ہے...</b>"
+        
+    load_msg = safe_send(message.chat.id, load_text, None, None)
+    
+    def check_traffic():
+        markup = InlineKeyboardMarkup().add(ibtn(btn_cls, callback_data="close_menu", style="danger"))
+        ranges = {}
+        data = load_data()
+        for srv in data.get("services_data", {}).values():
+            if service_query in str(srv.get("name", "")).lower():
+                for cnt in srv.get("countries", {}).values():
+                    safe_name = clean_country_name(cnt.get("name", "Unknown"))
+                    for rng in cnt.get("ranges", {}).values():
+                        if rng not in ranges: ranges[rng] = {"count": 1, "country": safe_name}
+        
+        api_keys = __get_all_api_keys(api_key)
+        res_data = None
+        for key in api_keys:
+            try:
+                headers = {'mauthapi': key, 'Cache-Control': 'no-cache'}
+                response = requests.get(f"{BASE_URL}/", headers=headers, timeout=10)
+                res = response.json()
+                if res.get("meta", {}).get("code") == 200:
+                    res_data = res
+                    break
+            except: pass
+            
+        if res_data and res_data.get("data", {}).get("services"):
+            for service in res_data["data"]["services"]:
+                service_name = service.get("sid", "").lower()
+                if service_query in service_name:
+                    country = clean_country_name(service.get("country", "Unknown"))
+                    # Get range from the service data
+                    if service.get("range"):
+                        rng_pattern = service["range"]
+                        if rng_pattern not in ranges: 
+                            ranges[rng_pattern] = {"count": 1, "country": country}
+                        else: 
+                            ranges[rng_pattern]["count"] += 1
+        
+        if ranges:
+            sorted_ranges = sorted(ranges.items(), key=lambda x: x[1]["count"], reverse=True)
+            if lang == "bn": res_text = f"📊 <b>{service_query.upper()}-এর শীর্ষ রেঞ্জসমূহ:</b>\n\n"
+            elif lang == "hi": res_text = f"📊 <b>{service_query.upper()} के लिए शीर्ष रेंज:</b>\n\n"
+            elif lang == "ur": res_text = f"📊 <b>{service_query.upper()} کے لیے سرفہرست رینجز:</b>\n\n"
+            else: res_text = f"📊 <b>TOP RANGES FOR {service_query.upper()}:</b>\n\n"
+                
+            for rng, details in sorted_ranges[:10]:
+                flag = get_country_flag(details['country'], premium=True)
+                res_text += f"{flag} <b>{details['country'].upper()}</b> → <code>{rng}</code> [{details['count']} OTPS]\n"
+        else: 
+            res_text = f"❌ <b>NO ACTIVE TRAFFIC FOUND.</b>"
+            if lang == "bn": res_text = f"❌ <b>কোনো সক্রিয় ট্রাফিক পাওয়া যায়নি।</b>"
+            elif lang == "hi": res_text = f"❌ <b>कोई सक्रिय ट्रैफ़िक नहीं मिला।</b>"
+            elif lang == "ur": res_text = f"❌ <b>کوئی فعال ٹریفک نہیں ملی۔</b>"
+        
+        if load_msg:
+            safe_send(message.chat.id, res_text, markup, load_msg.message_id)
+        else:
+            safe_send(message.chat.id, res_text, markup, None)
+
+    threading.Thread(target=check_traffic).start()
+
+def step1_add_fwd_group(message, msg_id):
+    if check_cancel(message, msg_id, lambda cid, mid: safe_send(cid, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), mid)): return
+    data = load_data()
+    new_id = message.text.strip()
+    data.setdefault("forward_groups", []).append({"chat_id": new_id, "buttons": []}); save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>GROUP ADDED!</b>", parse_mode="HTML")
+    safe_send(message.chat.id, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), None)
+
+def step_addgrpbtn_name(message, grp_id, msg_id):
+    if check_cancel(message, msg_id, show_edit_group_menu, grp_id): return
+    user_states[message.chat.id] = {'grp_id': grp_id, 'btn_name': message.text.strip().upper()}
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    markup = InlineKeyboardMarkup().add(ibtn("🔙 CANCEL", callback_data=f"editgrp_{grp_id}", style="danger"))
+    safe_send(message.chat.id, f"🔗 <b>SEND BUTTON URL:</b>", markup, None)
+    bot.register_next_step_handler_by_chat_id(message.chat.id, step_addgrpbtn_url, None)
+
+def step_addgrpbtn_url(message, msg_id):
+    state = user_states.get(message.chat.id, {})
+    grp_id = state.get('grp_id')
+    if check_cancel(message, msg_id, show_edit_group_menu, grp_id): return
+    
+    btn_name = state.get('btn_name')
+    btn_url = format_url(message.text.strip())
+    data = load_data()
+    for grp in data.get("forward_groups", []):
+        if str(grp['chat_id']) == str(grp_id): grp.setdefault("buttons", []).append({"name": btn_name, "url": btn_url}); break
+    save_data(data)
+    
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>BUTTON ADDED!</b>", parse_mode="HTML")
+    show_edit_group_menu(message.chat.id, grp_id, None)
+
+def process_main_otp_link(message, msg_id):
+    if check_cancel(message, msg_id, lambda cid, mid: safe_send(cid, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), mid)): return
+    data = load_data()
+    data["main_otp_link"] = format_url(message.text.strip()); save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>LINK UPDATED!</b>", parse_mode="HTML")
+    safe_send(message.chat.id, f"🔗 <b>GROUP SETTINGS</b>", get_group_settings_menu(), None)
+
+def process_set_watermark(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    data = load_data()
+    data["watermark"] = message.text.strip(); save_data(data)
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    bot.send_message(message.chat.id, f"✅ <b>WATERMARK UPDATED!</b>", parse_mode="HTML")
+    show_admin_panel(message.chat.id, None)
+
+def run_broadcast(chat_id, original_message, msg_id):
+    data = load_data()
+    users = data.get("users", [])
+    success, failed = 0, 0
+    for u in users:
+        try: bot.copy_message(chat_id=u, from_chat_id=chat_id, message_id=original_message.message_id); success += 1; time.sleep(0.05)
+        except: failed += 1
+    markup = InlineKeyboardMarkup().add(ibtn("🔙 BACK TO ADMIN", callback_data="back_to_admin", style="danger"))
+    report = f"📢 <b>BROADCAST DONE!</b>\n\n✅ <b>SENT:</b> {success}\n❌ <b>FAILED:</b> {failed}"
+    safe_send(chat_id, report, markup, msg_id)
+
+def process_broadcast(message, msg_id):
+    if check_cancel(message, msg_id, show_admin_panel): return
+    try: bot.delete_message(message.chat.id, msg_id)
+    except: pass
+    load_msg = safe_send(message.chat.id, f"⏳ <b>BROADCASTING...</b>", None, None)
+    threading.Thread(target=run_broadcast, args=(message.chat.id, message, load_msg.message_id if load_msg else None)).start()
+
+# --- Multi-API, Multi-Number Core OTP Functions ---
+def fetch_numbers_smart(chat_id, srv_id, srv_name, all_ranges, main_api_key, msg_id):
+    active_polls[str(chat_id)] = True
+    numbers_found = []
+    api_keys = __get_all_api_keys(main_api_key)
+    lang = get_user_lang(chat_id)
+    
+    random.shuffle(all_ranges) 
+    service_code = get_service_code(srv_name)
+    
+    data = load_data()
+    dynamic_max_nums = data.get("settings", {}).get("max_numbers", MAX_NUMBERS)
+    
+    for rng_data in all_ranges:
+        if len(numbers_found) >= dynamic_max_nums: break
+        cnt_id, c_name, r_id, r_val = rng_data
+        clean_range = str(r_val).strip().replace(" ", "")
+        
+        status_txt = "⏳ WAITING"
+        if lang == "bn": status_txt = "⏳ অপেক্ষায়"
+        elif lang == "hi": status_txt = "⏳ प्रतीक्षा में"
+        elif lang == "ur": status_txt = "⏳ انتظار میں"
+            
+        for _ in range(dynamic_max_nums - len(numbers_found)):
+            success_here = False
+            for key in api_keys:
+                try:
+                    payload = {"rid": clean_range}
+                    res = requests.post(
+                        f"{BASE_URL}/getnum",
+                        json=payload,
+                        headers={'mauthapi': key},
+                        timeout=8
+                    ).json()
+                    if res.get("meta", {}).get("code") == 200:
+                        numbers_found.append({
+                            "number": res.get("data", {}).get("full_number", ""),
+                            "number_id": res.get("rid", ""),
+                            "api_key": key,
+                            "status": status_txt,
+                            "cnt_id": cnt_id,
+                            "country_name": c_name,
+                            "r_id": r_id,
+                            "r_val": clean_range
+                        })
+                        success_here = True
+                        break 
+                except: pass
+            
+            if not success_here:
+                break 
+                
+        if len(numbers_found) > 0:
+            break 
+
+    if not numbers_found:
+        btn_back = "🔙 BACK"
+        if lang == "bn": btn_back = "🔙 ফিরে যান"
+        elif lang == "hi": btn_back = "🔙 वापस जाएं"
+        elif lang == "ur": btn_back = "🔙 واپس جائیں"
+            
+        markup = InlineKeyboardMarkup().add(ibtn(btn_back, callback_data=f"usr_s|{srv_id}", style="danger"))
+        if lang == "bn":
+            err_msg = f"❌ <b>দুঃখিত, এই মুহূর্তে সমস্ত রেঞ্জ স্টক আউট।</b>\n{DIVIDER}\n<i>আমরা উপলব্ধ রেঞ্জগুলো চেক করেছি কিন্তু কোনো নাম্বার পাওয়া যায়নি। দয়া করে পরে আবার চেষ্টা করুন।</i>"
+        elif lang == "hi":
+            err_msg = f"❌ <b>क्षमा करें, इस समय सभी रेंज आउट ऑफ़ स्टॉक हैं।</b>\n{DIVIDER}\n<i>हमने उपलब्ध रेंज जांचीं लेकिन कोई नंबर नहीं मिला। कृपया बाद में प्रयास करें।</i>"
+        elif lang == "ur":
+            err_msg = f"❌ <b>معذرت، اس وقت تمام رینجز آؤٹ آف اسٹاک ہیں۔</b>\n{DIVIDER}\n<i>ہم نے دستیاب رینجز چیک کیں لیکن کوئی نمبر نہیں ملا۔ براہ کرم بعد میں کوشش کریں۔</i>"
+        else:
+            err_msg = f"❌ 𝗦𝗢𝗥𝗥𝗬, 𝗔𝗟𝗟 𝗥𝗔𝗡𝗚𝗘𝗦 𝗔𝗥𝗘 𝗢𝗨𝗧 𝗢𝗙 𝗦𝗧𝗢𝗖𝗞 𝗖𝗨𝗥𝗥𝗘𝗡𝗧𝗟𝗬.\n{DIVIDER}\n<i>We checked available ranges but couldn't find an active number. Please try again later.</i>"
+            
+        safe_send(chat_id, err_msg, markup, msg_id)
+        active_polls[str(chat_id)] = False
+        return
+
+    watermark = data.get("watermark", BOT_NAME)
+    
+    final_country_name = clean_country_name(numbers_found[0]['country_name'])
+    final_cnt_id = numbers_found[0]['cnt_id']
+    final_r_id = numbers_found[0]['r_id']
+    
+    flag = get_country_flag(final_country_name, premium=True)
+    srv_emoji = emo(srv_name)
+    
+    if lang == "bn":
+        text = f"{PR_GEM} <b>নাম্বার বরাদ্দ হয়েছে</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>সার্ভিস:</b> <b>{html.escape(srv_name.upper())}</b>\n{flag} <b>দেশ:</b> <b>{html.escape(final_country_name.upper())}</b>\n{DIVIDER}\n"
+    elif lang == "hi":
+        text = f"{PR_GEM} <b>नंबर आवंटित किया गया</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>सर्विस:</b> <b>{html.escape(srv_name.upper())}</b>\n{flag} <b>देश:</b> <b>{html.escape(final_country_name.upper())}</b>\n{DIVIDER}\n"
+    elif lang == "ur":
+        text = f"{PR_GEM} <b>نمبر الاٹ کر دیا گیا</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>سروس:</b> <b>{html.escape(srv_name.upper())}</b>\n{flag} <b>ملک:</b> <b>{html.escape(final_country_name.upper())}</b>\n{DIVIDER}\n"
+    else:
+        text = f"{PR_GEM} <b>NUMBER ALLOCATED</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>SERVICE:</b> <b>{html.escape(srv_name.upper())}</b>\n{flag} <b>COUNTRY:</b> <b>{html.escape(final_country_name.upper())}</b>\n{DIVIDER}\n"
+        
+    for i, num_data in enumerate(numbers_found):
+        raw_num = str(num_data['number']).replace('+', '')
+        text += f"{i+1}️⃣ <code>+{raw_num}</code>  {num_data['status']}\n"
+    text += f"{DIVIDER}\n{PR_FIRE} <b>{html.escape(watermark.upper())}</b> {PR_FIRE}"
+    
+    main_link = format_url(data.get("main_otp_link", "https://t.me/"))
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    btn_chg = "🔄 CHANGE"
+    btn_otp = "📨 OTP GROUP"
+    btn_back = "🔙 BACK"
+    
+    if lang == "bn":
+        btn_chg = "🔄 পরিবর্তন করুন"
+        btn_otp = "📨 ওটিপি গ্রুপ"
+        btn_back = "🔙 ফিরে যান"
+    elif lang == "hi":
+        btn_chg = "🔄 बदलें"
+        btn_otp = "📨 OTP ग्रुप"
+        btn_back = "🔙 वापस जाएं"
+    elif lang == "ur":
+        btn_chg = "🔄 تبدیل کریں"
+        btn_otp = "📨 OTP گروپ"
+        btn_back = "🔙 واپس جائیں"
+    
+    markup.add(ibtn(btn_chg, callback_data=f"chg_r|{srv_id}|{final_cnt_id}|{final_r_id}", style="primary"), ibtn(btn_otp, url=main_link, style="success"))
+    markup.add(ibtn(btn_back, callback_data=f"usr_s|{srv_id}", style="danger"))
+    
+    service_info = {
+        'id': final_r_id, 'srv_id': srv_id, 'cnt_id': final_cnt_id, 
+        'service_name': srv_name, 'country_name': final_country_name, 'range': numbers_found[0]['r_val']
+    }
+    
+    active_polls[str(chat_id)] = {"numbers": numbers_found, "service_info": service_info, "message_id": msg_id, "watermark": watermark, "main_link": main_link, "lang": lang}
+    safe_send(chat_id, text, markup, msg_id)
+    
+    for num_data in numbers_found:
+        threading.Thread(target=poll_otp, args=(chat_id, num_data, service_info)).start()
+
+def update_number_status(chat_id, phone_number, status_text, emoji_status):
+    if str(chat_id) not in active_polls or not active_polls[str(chat_id)]: return
+    poll_data = active_polls[str(chat_id)]
+    numbers = poll_data.get("numbers", [])
+    message_id = poll_data.get("message_id")
+    service_info = poll_data.get("service_info", {})
+    watermark = poll_data.get("watermark", BOT_NAME)
+    main_link = poll_data.get("main_link", "https://t.me/")
+    lang = poll_data.get("lang", "en")
+    
+    for num_data in numbers:
+        if num_data["number"] == phone_number: num_data["status"] = f"{emoji_status} {status_text}"; break
+    
+    safe_country = clean_country_name(service_info.get('country_name', ''))
+    flag = get_country_flag(safe_country, premium=True)
+    srv_emoji = emo(service_info.get('service_name', ''))
+    
+    if lang == "bn":
+        text = f"{PR_GEM} <b>নাম্বার বরাদ্দ হয়েছে</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>সার্ভিস:</b> <b>{html.escape(service_info.get('service_name', '').upper())}</b>\n{flag} <b>দেশ:</b> <b>{html.escape(safe_country.upper())}</b>\n{DIVIDER}\n"
+    elif lang == "hi":
+        text = f"{PR_GEM} <b>नंबर आवंटित किया गया</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>सर्विस:</b> <b>{html.escape(service_info.get('service_name', '').upper())}</b>\n{flag} <b>देश:</b> <b>{html.escape(safe_country.upper())}</b>\n{DIVIDER}\n"
+    elif lang == "ur":
+        text = f"{PR_GEM} <b>نمبر الاٹ کر دیا گیا</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>سروس:</b> <b>{html.escape(service_info.get('service_name', '').upper())}</b>\n{flag} <b>ملک:</b> <b>{html.escape(safe_country.upper())}</b>\n{DIVIDER}\n"
+    else:
+        text = f"{PR_GEM} <b>NUMBER ALLOCATED</b> {PR_GEM}\n{DIVIDER}\n{srv_emoji} <b>SERVICE:</b> <b>{html.escape(service_info.get('service_name', '').upper())}</b>\n{flag} <b>COUNTRY:</b> <b>{html.escape(safe_country.upper())}</b>\n{DIVIDER}\n"
+        
+    for i, num_data in enumerate(numbers):
+        raw_num = str(num_data['number']).replace('+', '')
+        text += f"{i+1}️⃣ <code>+{raw_num}</code>  {num_data['status']}\n"
+    text += f"{DIVIDER}\n{PR_FIRE} <b>{html.escape(watermark.upper())}</b> {PR_FIRE}"
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    btn_chg = "🔄 CHANGE"
+    btn_otp = "📨 OTP GROUP"
+    btn_back = "🔙 BACK"
+    
+    if lang == "bn":
+        btn_chg = "🔄 পরিবর্তন করুন"
+        btn_otp = "📨 ওটিপি গ্রুপ"
+        btn_back = "🔙 ফিরে যান"
+    elif lang == "hi":
+        btn_chg = "🔄 बदलें"
+        btn_otp = "📨 OTP ग्रुप"
+        btn_back = "🔙 वापस जाएं"
+    elif lang == "ur":
+        btn_chg = "🔄 تبدیل کریں"
+        btn_otp = "📨 OTP گروپ"
+        btn_back = "🔙 واپس جائیں"
+    
+    markup.add(ibtn(btn_chg, callback_data=f"chg_r|{service_info.get('srv_id', '')}|{service_info.get('cnt_id', '')}|{service_info.get('id', '')}", style="primary"), ibtn(btn_otp, url=main_link, style="success"))
+    markup.add(ibtn(btn_back, callback_data=f"usr_s|{service_info.get('srv_id', '')}", style="danger"))
+    safe_send(chat_id, text, markup, message_id)
+
+def poll_otp(chat_id, num_data, service_info):
+    number_id = num_data["number_id"]
+    phone_number = num_data["number"]
+    api_key = num_data["api_key"]
+    headers = {'mauthapi': api_key}
+    timeout = 600
+    start_time = time.time()
+    
+    lang = get_user_lang(chat_id)
+    
+    while time.time() - start_time < timeout:
+        if str(chat_id) not in active_polls or not active_polls[str(chat_id)]: return 
+        try:
+            res = requests.get(f"{BASE_URL}/otps", headers=headers, timeout=15)
+            s_data = res.json()
+            if s_data.get("meta", {}).get("code") == 200:
+                otps = s_data.get("data", {}).get("otps", [])
+                for otp_entry in otps:
+                    if otp_entry.get("number") == phone_number:
+                        otp_code = re.search(r'\b(\d{4,6})\b', otp_entry.get("message", ""))
+                        if otp_code:
+                            otp_code = otp_code.group(1)
+                        else:
+                            otp_code = "0000"
+                        
+                        full_sms = otp_entry.get("message", "")
+                        app_name_from_api = service_info.get('service_name', '')
+                        detected_service = detect_service_from_sms(full_sms, app_name_from_api)
+                        
+                        status_txt = "OTP RECEIVED"
+                        if lang == "bn": status_txt = "ওটিপি পাওয়া গেছে"
+                        elif lang == "hi": status_txt = "OTP मिल गया"
+                        elif lang == "ur": status_txt = "OTP موصول ہو گیا"
+                            
+                        update_number_status(chat_id, phone_number, status_txt, "✅")
+                        
+                        # Anti-Cheat & Save System
+                        unique_otp_id = f"{phone_number}_{otp_code}"
+                        data = load_data()
+                        dynamic_otp_bonus_usd = data.get("settings", {}).get("otp_bonus", OTP_BONUS)
+                        
+                        add_to_history(chat_id, detected_service, f"+{str(phone_number).replace('+', '')}", otp_code)
+                        
+                        data["otp_counts"][str(chat_id)] = data.get("otp_counts", {}).get(str(chat_id), 0) + 1
+                        
+                        if unique_otp_id not in data.get("processed_otps", []):
+                            data.setdefault("processed_otps", []).append(unique_otp_id)
+                            current_bal = data.get("balances", {}).get(str(chat_id), 0.0)
+                            data.setdefault("balances", {})[str(chat_id)] = round(current_bal + dynamic_otp_bonus_usd, 5)
+                            try:
+                                b_amount = format_currency(dynamic_otp_bonus_usd, lang)
+                                congrats = f"🎉 <b>CONGRATULATIONS!</b> You received <b>{b_amount}</b> for successful OTP extraction!"
+                                if lang == "bn": congrats = f"🎉 <b>অভিনন্দন!</b> আপনি সফল ওটিপি উত্তোলনের জন্য <b>{b_amount}</b> পেয়েছেন!"
+                                elif lang == "hi": congrats = f"🎉 <b>बधाई हो!</b> सफल OTP प्राप्ति के लिए आपको <b>{b_amount}</b> मिले हैं!"
+                                elif lang == "ur": congrats = f"🎉 <b>مبارک ہو!</b> کامیاب OTP حاصل کرنے پر آپ کو <b>{b_amount}</b> ملے ہیں!"
+                                    
+                                bot.send_message(chat_id, congrats, parse_mode="HTML")
+                            except: pass
+                            
+                        save_data(data)
+                        
+                        safe_country = clean_country_name(service_info['country_name'])
+                        flag = get_country_flag(safe_country, premium=True)
+                        srv_emoji = emo(detected_service)
+                        disp_num = f"+{str(phone_number).replace('+', '')}"
+                        
+                        # Inbox Message Update
+                        if lang == "bn":
+                            inbox_msg = f"✨ <b>[ ওটিপি সফলভাবে পাওয়া গেছে ]</b> ✨\n{DIVIDER}\n📲 <b>সার্ভিস:</b> <b>{detected_service.upper()}</b>\n🌍 <b>দেশ:</b> {flag} <b>{html.escape(safe_country.upper())}</b>\n📞 <b>নাম্বার:</b> <code>{disp_num}</code>\n{THIN_DIVIDER}\n🔐 <b>আপনার ওটিপি কোড:</b>\n🎯 <code>{otp_code}</code> 🎯\n{DIVIDER}\n{PR_GEM} <b>{html.escape(data.get('watermark', BOT_NAME).upper())}</b> {PR_GEM}"
+                        elif lang == "hi":
+                            inbox_msg = f"✨ <b>[ OTP सफलतापूर्वक मिल गया ]</b> ✨\n{DIVIDER}\n📲 <b>सर्विस:</b> <b>{detected_service.upper()}</b>\n🌍 <b>देश:</b> {flag} <b>{html.escape(safe_country.upper())}</b>\n📞 <b>नंबर:</b> <code>{disp_num}</code>\n{THIN_DIVIDER}\n🔐 <b>आपका OTP कोड:</b>\n🎯 <code>{otp_code}</code> 🎯\n{DIVIDER}\n{PR_GEM} <b>{html.escape(data.get('watermark', BOT_NAME).upper())}</b> {PR_GEM}"
+                        elif lang == "ur":
+                            inbox_msg = f"✨ <b>[ OTP کامیابی سے حاصل کر لیا گیا ]</b> ✨\n{DIVIDER}\n📲 <b>سروس:</b> <b>{detected_service.upper()}</b>\n🌍 <b>ملک:</b> {flag} <b>{html.escape(safe_country.upper())}</b>\n📞 <b>نمبر:</b> <code>{disp_num}</code>\n{THIN_DIVIDER}\n🔐 <b>آپ کا OTP کوڈ:</b>\n🎯 <code>{otp_code}</code> 🎯\n{DIVIDER}\n{PR_GEM} <b>{html.escape(data.get('watermark', BOT_NAME).upper())}</b> {PR_GEM}"
+                        else:
+                            inbox_msg = f"✨ <b>[ OTP SUCCESSFULLY RETRIEVED ]</b> ✨\n{DIVIDER}\n📲 <b>SERVICE :</b> <b>{detected_service.upper()}</b>\n🌍 <b>REGION  :</b> {flag} <b>{html.escape(safe_country.upper())}</b>\n📞 <b>NUMBER  :</b> <code>{disp_num}</code>\n{THIN_DIVIDER}\n🔐 <b>YOUR OTP CODE:</b>\n🎯 <code>{otp_code}</code> 🎯\n{DIVIDER}\n{PR_GEM} <b>{html.escape(data.get('watermark', BOT_NAME).upper())}</b> {PR_GEM}"
+                            
+                        safe_send(chat_id, inbox_msg)
+                        
+                        # GROUP TICKET WITH SPECIFIC BUTTONS
+                        masked_num = mask_number(phone_number)
+                        group_msg = f"┏━━━━━━━━━━━━━━━━━━━━━━┓\n┣ 📲 <b>APP:</b> {srv_emoji} <b>{detected_service.upper()}</b>\n┣ 🌍 <b>REG:</b> {flag} <b>{safe_country.upper()}</b>\n┣ 📞 <b>NUM:</b> <code>{masked_num}</code>\n┗━━━━━━━━━━━━━━━━━━━━━━┛\n💎 <b>{html.escape(data.get('watermark', BOT_NAME).upper())}</b> 💎"
+                        
+                        bot_link = f"https://t.me/{BOT_USERNAME}" if BOT_USERNAME else "https://t.me/"
+                        channel_link = data.get("force_join_channels", ["https://t.me/"])[0] if data.get("force_join_channels") else bot_link
+                        
+                        for grp in data.get("forward_groups", []):
+                            try:
+                                grp_markup = InlineKeyboardMarkup(row_width=2)
+                                
+                                btn_cp = f"📋 COPY OTP: {otp_code}"
+                                btn_gt = "📲 Get Number"
+                                btn_jn = "📢 Join Channel"
+                                btn_mn = "🔗 Main Channel"
+                                
+                                if HAS_COPY_BTN: grp_markup.add(ibtn(btn_cp, copy_text_str=otp_code, style="success"))
+                                else: grp_markup.add(ibtn(btn_cp, callback_data=f"cp_{otp_code}", style="success"))
+                                
+                                grp_markup.add(
+                                    ibtn(btn_gt, url=bot_link, style="success"),
+                                    ibtn(btn_jn, url=channel_link, style="primary")
+                                )
+                                grp_markup.add(ibtn(btn_mn, url=channel_link, style="primary"))
+                                
+                                for btn in grp.get("buttons", []):
+                                    grp_markup.add(ibtn(btn['name'].upper(), url=btn['url'], style="primary"))
+                                    
+                                safe_send(grp['chat_id'], group_msg, grp_markup)
+                            except: pass
+                        return 
+        except: pass 
+        time.sleep(3) 
+        
+    status_txt = "TIMEOUT"
+    if lang == "bn": status_txt = "সময় শেষ"
+    elif lang == "hi": status_txt = "समय समाप्त"
+    elif lang == "ur": status_txt = "وقت ختم"
+    update_number_status(chat_id, phone_number, status_txt, "⏰")
+
+if __name__ == "__main__":
+    print("💎 MINO X SMS BOT IS RUNNING SUCCESSFULLY 💎")
+    bot.infinity_polling()
